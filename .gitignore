@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local
+docs
+*.zip
+*.pdf
+PRD.md
+TED.md
