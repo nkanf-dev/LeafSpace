@@ -1,0 +1,4 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "alibaba-coding-plan-cn/glm-5"
+}
