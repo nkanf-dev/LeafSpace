@@ -29,6 +29,7 @@ export interface HeldPage {
   color?: string;         // 颜色标签 (用于分类)
   createdAt: string;      // 创建时间 (ISO)
   isOpen: boolean;        // 标识当前是否已在窗口中展示
+  linkedWindowIds: string[]; // 当前关联到该夹页的窗口 ID 列表
 }
 
 /**

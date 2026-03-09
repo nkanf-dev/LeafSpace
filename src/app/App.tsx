@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import './App.css';
-import { WorkspaceCanvas } from './components/workspace/WorkspaceCanvas';
-import { HeldPagesPanel } from './components/held-pages/HeldPagesPanel';
-import { QuickFlipOverlay } from './components/quick-flip/QuickFlipOverlay';
-import { TimelineBar } from './components/timeline/TimelineBar';
-import { HeldPage } from './types/domain';
+import { WorkspaceCanvas } from '../components/workspace/WorkspaceCanvas';
+import { HeldPagesPanel } from '../components/held-pages/HeldPagesPanel';
+import { QuickFlipOverlay } from '../components/quick-flip/QuickFlipOverlay';
+import { TimelineBar } from '../components/timeline/TimelineBar';
+import type { HeldPage } from '../types/domain';
 
 /**
  * LeafSpace 主应用壳层 (UI 深度开发版)
@@ -15,8 +15,8 @@ function App() {
   const [totalPages] = useState(100);
   const [isQuickFlipVisible, setIsQuickFlipVisible] = useState(false);
   const [heldPages, setHeldPages] = useState<HeldPage[]>([
-    { id: '1', pageNumber: 5, defaultName: 'Intro', createdAt: '', isOpen: false },
-    { id: '2', pageNumber: 12, defaultName: 'Architecture', createdAt: '', isOpen: false }
+    { id: '1', pageNumber: 5, defaultName: 'Intro', createdAt: '', isOpen: false, linkedWindowIds: [] },
+    { id: '2', pageNumber: 12, defaultName: 'Architecture', createdAt: '', isOpen: false, linkedWindowIds: [] },
   ]);
 
   useEffect(() => {
@@ -43,23 +43,23 @@ function App() {
         </section>
 
         <aside className="leaf-held-pages-panel">
-          <HeldPagesPanel 
-            pages={heldPages.map(p => ({ ...p, isOpen: p.pageNumber === currentPage }))} 
+          <HeldPagesPanel
+            pages={heldPages.map((p) => ({ ...p, isOpen: p.pageNumber === currentPage }))}
             onPageClick={(p) => setCurrentPage(p.pageNumber)}
-            onRemovePage={(id) => setHeldPages(prev => prev.filter(pg => pg.id !== id))}
+            onRemovePage={(id) => setHeldPages((prev) => prev.filter((pg) => pg.id !== id))}
           />
         </aside>
       </main>
 
       <footer className="leaf-timeline-bar">
-        <TimelineBar 
-          currentPage={currentPage} 
-          totalPages={totalPages} 
-          onPageClick={setCurrentPage} 
+        <TimelineBar
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageClick={setCurrentPage}
         />
       </footer>
 
-      <QuickFlipOverlay 
+      <QuickFlipOverlay
         isVisible={isQuickFlipVisible}
         onClose={() => setIsQuickFlipVisible(false)}
         currentPage={currentPage}

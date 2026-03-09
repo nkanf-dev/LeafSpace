@@ -1,9 +1,14 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useBookStore } from '../../stores/bookStore';
+import {
+  configureBookStoreDependencies,
+  resetBookStoreDependencies,
+  useBookStore,
+} from '../../stores/bookStore';
 
 describe('bookStore', () => {
   beforeEach(() => {
+    resetBookStoreDependencies();
     useBookStore.getState().reset();
   });
 
@@ -31,6 +36,35 @@ describe('bookStore', () => {
     });
   });
 
+  it('loads document metadata through PDFService dependency injection', async () => {
+    const fakePdfService = {
+      destroy: vi.fn().mockResolvedValue(undefined),
+      getDocumentData: vi.fn(),
+      getDocumentFingerprint: vi.fn().mockReturnValue('doc-123'),
+      getPage: vi.fn(),
+      getTotalPages: vi.fn(),
+      hasLoadedDocument: vi.fn(),
+      loadDocument: vi.fn().mockResolvedValue({ numPages: 12 }),
+      renderPage: vi.fn(),
+    };
+
+    configureBookStoreDependencies({
+      pdfService: fakePdfService as never,
+    });
+
+    await useBookStore.getState().loadDocument('memory://sample.pdf');
+
+    expect(fakePdfService.loadDocument).toHaveBeenCalledWith('memory://sample.pdf');
+    expect(useBookStore.getState()).toMatchObject({
+      currentPage: 1,
+      documentId: 'doc-123',
+      error: null,
+      scale: 1,
+      status: 'ready',
+      totalPages: 12,
+    });
+  });
+
   it('keeps currentPage inside bounds when the total page count changes', () => {
     useBookStore.getState().setDocumentReady({
       documentId: 'doc-2',
@@ -53,9 +87,23 @@ describe('bookStore', () => {
     expect(useBookStore.getState().currentPage).toBe(1);
   });
 
-  it('records load failures as explicit error states', () => {
-    useBookStore.getState().startLoading();
-    useBookStore.getState().failLoading('Unable to parse PDF');
+  it('records load failures as explicit error states', async () => {
+    const fakePdfService = {
+      destroy: vi.fn().mockResolvedValue(undefined),
+      getDocumentData: vi.fn(),
+      getDocumentFingerprint: vi.fn().mockReturnValue(null),
+      getPage: vi.fn(),
+      getTotalPages: vi.fn(),
+      hasLoadedDocument: vi.fn(),
+      loadDocument: vi.fn().mockRejectedValue(new Error('Unable to parse PDF')),
+      renderPage: vi.fn(),
+    };
+
+    configureBookStoreDependencies({
+      pdfService: fakePdfService as never,
+    });
+
+    await expect(useBookStore.getState().loadDocument('memory://broken.pdf')).rejects.toThrow('Unable to parse PDF');
 
     expect(useBookStore.getState()).toMatchObject({
       error: 'Unable to parse PDF',

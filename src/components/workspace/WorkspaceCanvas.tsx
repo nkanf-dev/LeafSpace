@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ReaderWindow } from '../../types/domain';
+import type { ReaderWindow } from '../../types/domain';
 import { ReaderViewport } from '../reader/ReaderViewport';
 import '../../styles/WorkspaceCanvas.css';
 
