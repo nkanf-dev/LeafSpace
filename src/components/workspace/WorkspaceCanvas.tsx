@@ -17,10 +17,16 @@ interface Props {
 export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWindowClose }) => {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const dragOffset = useRef({ x: 0, y: 0 });
+  
+  // 使用 Ref 保持对最新 windows 的引用，避免 mousemove 闭包问题
+  const windowsRef = useRef(windows);
+  useEffect(() => {
+    windowsRef.current = windows;
+  }, [windows]);
 
   // 处理拖拽开始
   const handleMouseDown = (e: React.MouseEvent, win: ReaderWindow) => {
-    if (win.type === 'main') return; // 主窗不可移动
+    if (win.type === 'main') return;
 
     setDraggingId(win.id);
     const rect = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
@@ -30,16 +36,18 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
     };
     
     // 激活窗口 (置顶)
-    if (!win.isActive) {
-      onWindowUpdate({ ...win, isActive: true, zIndex: Math.max(...windows.map(w => w.zIndex)) + 1 });
-    }
+    onWindowUpdate({ 
+      ...win, 
+      isActive: true, 
+      zIndex: Math.max(...windowsRef.current.map(w => w.zIndex), 0) + 1 
+    });
   };
 
   // 处理拖拽移动 (全局监听)
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!draggingId) return;
 
-    const win = windows.find(w => w.id === draggingId);
+    const win = windowsRef.current.find(w => w.id === draggingId);
     if (!win) return;
 
     const newX = e.clientX - dragOffset.current.x;
@@ -50,7 +58,7 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
       x: newX,
       y: newY,
     });
-  }, [draggingId, windows, onWindowUpdate]);
+  }, [draggingId, onWindowUpdate]);
 
   // 处理拖拽结束
   const handleMouseUp = useCallback(() => {
