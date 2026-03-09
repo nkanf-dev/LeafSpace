@@ -5,44 +5,28 @@
   width: 100vw;
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  color: #333;
 }
 
 .leaf-header {
   height: 48px;
-  background-color: #333;
+  background-color: #1a1a1a;
   color: #fff;
   display: flex;
   align-items: center;
-  padding: 0 1rem;
-  gap: 2rem;
-  flex-shrink: 0;
+  padding: 0 1.5rem;
+  border-bottom: 1px solid #333;
 }
 
 .logo {
-  font-weight: bold;
-  font-size: 1.2rem;
+  font-weight: 800;
+  letter-spacing: -0.5px;
   color: #007bff;
+  margin-right: 2rem;
 }
 
 .document-info {
-  font-size: 0.9rem;
-  color: #ccc;
-  flex: 1;
-}
-
-.hold-btn {
-  background-color: #007bff;
-  color: white;
-  border: none;
-  padding: 0.4rem 1rem;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.hold-btn:hover {
-  background-color: #0056b3;
+  font-size: 0.8rem;
+  color: #888;
 }
 
 .leaf-main-container {
@@ -51,24 +35,22 @@
   overflow: hidden;
 }
 
-.leaf-reader-viewport {
+.leaf-workspace-area {
   flex: 1;
+  background-color: #2b2b2b;
+  position: relative;
   overflow: hidden;
 }
 
 .leaf-held-pages-panel {
-  width: 260px;
-  flex-shrink: 0;
+  width: 280px;
+  border-left: 1px solid #333;
+  background-color: #1a1a1a;
 }
 
 .leaf-timeline-bar {
-  height: 32px;
-  background-color: #f8f9fa;
-  border-top: 1px solid #ddd;
-  display: flex;
-  align-items: center;
-  padding: 0 1rem;
-  font-size: 0.8rem;
-  color: #666;
-  flex-shrink: 0;
+  height: 64px;
+  background-color: #1a1a1a;
+  border-top: 1px solid #333;
+  color: #eee;
 }
