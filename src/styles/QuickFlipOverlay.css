@@ -1,73 +1,129 @@
-.quick-flip-overlay {
+.kindle-scroll-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background-color: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(8px);
-  z-index: 1000;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 3000;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   justify-content: center;
+  overflow: hidden;
 }
 
-.quick-flip-content {
-  width: 90%;
+.scroll-backdrop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(251, 250, 248, 0.7);
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+}
+
+.scroll-content {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+}
+
+.scroll-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.title-serif {
+  font-family: var(--font-serif);
+  font-size: 2.8rem;
+  font-weight: 800;
+  color: var(--kindle-ink);
+}
+
+.controls-hint {
+  font-size: 0.85rem;
+  color: var(--kindle-gray);
+  margin-top: 10px;
+}
+
+.controls-hint kbd {
+  background: #fff;
+  border: 1px solid var(--kindle-border);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* 核心修复：物理穿透 react-pdf 生成的中间层 div */
+.scroll-strip {
+  width: 100vw;
+  overflow-x: auto;
+  scrollbar-width: none;
+  display: block;
+}
+
+.scroll-strip::-webkit-scrollbar { display: none; }
+
+.scroll-strip .react-pdf__Document {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  padding: 100px 50vw;
+  gap: 60px;
+  align-items: center;
+  min-width: max-content;
+}
+
+.scroll-item {
+  flex-shrink: 0 !important;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2rem;
-}
-
-.quick-flip-strip {
-  display: flex;
-  gap: 1rem;
-  overflow-x: auto;
-  padding: 2rem;
-  width: 100%;
-  scroll-behavior: smooth;
-}
-
-/* 隐藏滚动条但保留功能 */
-.quick-flip-strip::-webkit-scrollbar {
-  display: none;
-}
-.quick-flip-strip {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-.quick-flip-item {
-  flex: 0 0 120px;
-  height: 160px;
-  background-color: #333;
-  border: 2px solid transparent;
+  gap: 24px;
   cursor: pointer;
-  transition: transform 0.2s, border-color 0.2s;
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  opacity: 0.35;
+}
+
+.scroll-item.selected { opacity: 1; }
+
+.scroll-card-ux {
+  width: 200px;
+  height: 280px;
+  background: #fff;
+  border-radius: 2px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05), 0 30px 80px rgba(0,0,0,0.1);
+  border: 1px solid var(--kindle-border);
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+  transition: all 0.3s;
 }
 
-.quick-flip-item:hover {
-  transform: scale(1.1);
-  border-color: #fff;
+.scroll-item.selected .scroll-card-ux {
+  box-shadow: 0 50px 120px rgba(0,0,0,0.22);
+  border: 3px solid var(--kindle-ink);
+  transform: translateY(-15px);
 }
 
-.quick-flip-item.active {
-  border-color: #007bff;
-  box-shadow: 0 0 15px rgba(0, 123, 255, 0.5);
+/* 悬停仅视觉缩放，不产生滚动 */
+.scroll-item:hover:not(.selected) { opacity: 0.6; }
+.scroll-item:hover:not(.selected) .scroll-card-ux { transform: translateY(-5px); }
+
+.scroll-item.held .scroll-card-ux { border-color: #f5a623; }
+
+.held-pin-vector {
+  position: absolute;
+  top: 12px; right: 12px;
+  color: #f5a623;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+  transform: scale(1.5);
 }
 
-.thumbnail-placeholder {
-  color: #fff;
-  font-size: 1.5rem;
-  font-weight: bold;
+.scroll-label-ux {
+  font-family: var(--font-serif);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--kindle-ink);
+  opacity: 0;
+  transition: opacity 0.3s;
 }
 
-.quick-flip-current-label,
-.quick-flip-preview-label {
-  color: white;
-  font-size: 1.2rem;
-}
+.scroll-item.selected .scroll-label-ux { opacity: 1; }

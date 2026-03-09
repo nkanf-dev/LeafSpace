@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 import { test, expect } from '@playwright/test';
 
 test.describe('LeafSpace E2E - App Initialization', () => {
@@ -9,6 +11,6 @@ test.describe('LeafSpace E2E - App Initialization', () => {
     await expect(root).toBeVisible();
     
     // 验证 React 默认内容是否存在 (后期会由 Agent 1/2 替换为真实 UI)
-    await expect(page.locator('h1')).toContainText('LeafSpace');
+    await expect(page.locator('.logo')).toContainText('LeafSpace');
   });
 });

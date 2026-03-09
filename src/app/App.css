@@ -1,56 +1,124 @@
+:root {
+  --kindle-paper: #fbfaf8;
+  --kindle-ink: #1a1a1a;
+  --kindle-gray: #6b7280;
+  --kindle-border: #e8e4e0;
+  --kindle-accent: #4a90e2;
+  --font-serif: "Georgia", "Times New Roman", serif;
+}
+
+/* 拖拽时全局禁止选中 */
+body.is-dragging { user-select: none !important; cursor: grabbing !important; }
+
+/* 适配 UI 风格的滚动条 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--kindle-paper); }
+::-webkit-scrollbar-thumb { background: #d1cec7; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: var(--kindle-gray); }
+
+* { box-sizing: border-box; outline: none; }
+
+body, html {
+  margin: 0; padding: 0;
+  height: 100vh; width: 100vw;
+  background-color: var(--kindle-paper);
+  color: var(--kindle-ink);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
 .leaf-space-shell {
   display: flex;
   flex-direction: column;
   height: 100vh;
   width: 100vw;
-  overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 .leaf-header {
-  height: 48px;
-  background-color: #1a1a1a;
-  color: #fff;
+  height: 56px;
+  background: var(--kindle-paper);
+  border-bottom: 1px solid var(--kindle-border);
   display: flex;
   align-items: center;
-  padding: 0 1.5rem;
-  border-bottom: 1px solid #333;
+  justify-content: space-between;
+  padding: 0 24px;
+  flex-shrink: 0;
+  z-index: 100;
 }
 
-.logo {
-  font-weight: 800;
-  letter-spacing: -0.5px;
-  color: #007bff;
-  margin-right: 2rem;
+.logo-text { font-family: var(--font-serif); font-size: 1.4rem; font-weight: 800; font-style: italic; letter-spacing: -0.5px; }
+
+.kindle-btn {
+  background: var(--kindle-ink);
+  color: #fff;
+  border: none;
+  padding: 8px 18px;
+  border-radius: 2px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: var(--font-serif);
 }
 
-.document-info {
-  font-size: 0.8rem;
-  color: #888;
-}
+.kindle-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.kindle-btn:active { transform: scale(0.95); }
+.kindle-btn.outline { background: transparent; color: var(--kindle-ink); border: 1px solid var(--kindle-ink); }
 
 .leaf-main-container {
   flex: 1;
   display: flex;
+  flex-direction: row;
   overflow: hidden;
 }
 
 .leaf-workspace-area {
   flex: 1;
-  background-color: #2b2b2b;
   position: relative;
-  overflow: hidden;
+  background: #edece9;
+  display: flex; /* 核心修复 */
+  flex-direction: column;
 }
 
-.leaf-held-pages-panel {
-  width: 280px;
-  border-left: 1px solid #333;
-  background-color: #1a1a1a;
+/* 核心修复：欢迎页绝对居中布局 */
+.welcome-screen {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--kindle-paper);
+  z-index: 10;
 }
 
-.leaf-timeline-bar {
-  height: 64px;
-  background-color: #1a1a1a;
-  border-top: 1px solid #333;
-  color: #eee;
+.welcome-screen .hero {
+  max-width: 600px;
+  text-align: center;
+  padding: 40px;
 }
+
+.hero h1 {
+  font-family: var(--font-serif);
+  font-size: 3.5rem;
+  font-weight: 800;
+  margin-bottom: 20px;
+  color: var(--kindle-ink);
+  letter-spacing: -1px;
+}
+
+.hero p {
+  font-size: 1.2rem;
+  color: var(--kindle-gray);
+  margin-bottom: 40px;
+  line-height: 1.6;
+}
+
+.kindle-btn.large {
+  padding: 14px 40px;
+  font-size: 1.1rem;
+}
+
+.leaf-held-pages-panel { width: 300px; border-left: 1px solid var(--kindle-border); background: var(--kindle-paper); flex-shrink: 0; }
+.leaf-timeline-bar { height: 64px; background: var(--kindle-paper); border-top: 1px solid var(--kindle-border); flex-shrink: 0; }

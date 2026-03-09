@@ -1,67 +1,49 @@
-/// <reference lib="webworker" />
+import * as pdfjsLib from 'pdfjs-dist';
 
-import { getDocument } from 'pdfjs-dist';
-import type { ThumbnailWorkerRequest, ThumbnailWorkerResponse } from '../services/thumbnailProtocol';
+// 在 Worker 内部，我们直接从核心库加载，不再设置 GlobalWorkerOptions.workerSrc
+// 因为 Worker 本身就是执行环境，不需要再指定另一个 worker 路径
 
-const workerScope = self as DedicatedWorkerGlobalScope;
+const worker = self as any;
 
-workerScope.onmessage = async (event: MessageEvent<ThumbnailWorkerRequest>) => {
+worker.onmessage = async (event: MessageEvent<any>) => {
   const message = event.data;
+  if (message.type !== 'render') return;
 
   try {
-    const response = await renderThumbnail(message);
-    workerScope.postMessage(response);
-  } catch (error) {
-    const response: ThumbnailWorkerResponse = {
-      type: 'error',
-      error: error instanceof Error ? error.message : 'Unknown thumbnail worker error.',
-      id: message.id,
-      key: message.key,
-      pageNumber: message.pageNumber,
-    };
+    const loadingTask = pdfjsLib.getDocument({
+      url: message.source,
+      cMapUrl: `https://unpkg.com/pdfjs-dist@5.4.296/cmaps/`,
+      cMapPacked: true,
+    });
 
-    workerScope.postMessage(response);
-  }
-};
-
-async function renderThumbnail(message: ThumbnailWorkerRequest): Promise<ThumbnailWorkerResponse> {
-  if (typeof OffscreenCanvas === 'undefined') {
-    throw new Error('OffscreenCanvas is not available for thumbnail rendering.');
-  }
-
-  const loadingTask = getDocument({
-    data: new Uint8Array(message.source),
-  });
-
-  try {
     const document = await loadingTask.promise;
     const page = await document.getPage(message.pageNumber);
+    
     const baseViewport = page.getViewport({ scale: 1 });
-    const scale = message.maxWidth > 0 ? message.maxWidth / baseViewport.width : 1;
+    const scale = message.maxWidth / baseViewport.width;
     const viewport = page.getViewport({ scale });
-    const canvas = new OffscreenCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
-    const context = canvas.getContext('2d', { alpha: false });
+    
+    // 使用 Worker 自带的 OffscreenCanvas
+    const canvas = new OffscreenCanvas(
+      Math.floor(viewport.width), 
+      Math.floor(viewport.height)
+    );
+    
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Worker Canvas Context Null');
 
-    if (!context) {
-      throw new Error('Unable to acquire OffscreenCanvas 2D context.');
-    }
+    context.fillStyle = 'white';
+    context.fillRect(0, 0, canvas.width, canvas.height);
 
-    const renderTask = page.render({
-      canvas: null,
-      canvasContext: context as unknown as CanvasRenderingContext2D,
+    await page.render({
+      canvasContext: context as any,
       viewport,
-    });
+      canvas: null as any
+    }).promise;
 
-    await renderTask.promise;
-
-    const blob = await canvas.convertToBlob({
-      quality: 0.85,
-      type: 'image/webp',
-    });
-
-    page.cleanup();
-
-    return {
+    const blob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.8 });
+    
+    worker.postMessage({
       type: 'success',
       blob,
       height: canvas.height,
@@ -69,8 +51,17 @@ async function renderThumbnail(message: ThumbnailWorkerRequest): Promise<Thumbna
       key: message.key,
       pageNumber: message.pageNumber,
       width: canvas.width,
-    };
-  } finally {
-    await loadingTask.destroy();
+    });
+
+    page.cleanup();
+    await document.destroy();
+  } catch (error: any) {
+    worker.postMessage({
+      type: 'error',
+      error: error.message || 'Unknown Worker Error',
+      id: message.id,
+      key: message.key,
+      pageNumber: message.pageNumber,
+    });
   }
-}
+};

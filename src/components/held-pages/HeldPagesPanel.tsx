@@ -1,5 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Document, Thumbnail } from 'react-pdf';
 import type { HeldPage } from '../../types/domain';
+import { useBookStore } from '../../stores/bookStore';
+import { LayoutGrid, List, X } from 'lucide-react';
 import '../../styles/HeldPagesPanel.css';
 
 interface Props {
@@ -8,39 +11,48 @@ interface Props {
   onRemovePage: (id: string) => void;
 }
 
-/**
- * HeldPagesPanel (夹页面板)
- * 职责：展示已收藏/夹住的页面，支持快速跳转。
- */
 export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onRemovePage }) => {
+  const documentUrl = useBookStore(state => state.documentUrl);
+  const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
+
   return (
-    <div className="held-pages-panel">
-      <h3 className="panel-title">Held Pages</h3>
+    <div className={`held-pages-panel kindle-panel view-${viewMode}`}>
+      <div className="panel-header-ux">
+        <span>夹住的页面 ({pages.length})</span>
+        <div className="view-toggle">
+          <button className={viewMode === 'card' ? 'active' : ''} onClick={() => setViewMode('card')} title="卡片视图">
+            <LayoutGrid size={14} />
+          </button>
+          <button className={viewMode === 'list' ? 'active' : ''} onClick={() => setViewMode('list')} title="列表视图">
+            <List size={14} />
+          </button>
+        </div>
+      </div>
+
       <div className="held-pages-list">
         {pages.length === 0 ? (
-          <p className="empty-state">No held pages</p>
+          <div className="empty-state-ux">✧ 卷轴空空如也</div>
         ) : (
-          pages.map(page => (
-            <div 
-              key={page.id} 
-              className={`held-page-item ${page.isOpen ? 'active' : ''}`}
-              onClick={() => onPageClick(page)}
-            >
-              <div className="held-page-info">
-                <span className="page-number">P. {page.pageNumber}</span>
-                <span className="page-name">{page.customName || page.defaultName}</span>
+          <Document file={documentUrl}>
+            {pages.map(page => (
+              <div key={page.id} className={`held-item-ux ${page.isOpen ? 'active' : ''}`} onClick={() => onPageClick(page)}>
+                {viewMode === 'card' && (
+                  <div className="card-thumb-ux">
+                    <Thumbnail pageNumber={page.pageNumber} width={70} loading="..." />
+                  </div>
+                )}
+                <div className="card-content-ux">
+                  <div className="card-top-ux">
+                    <span className="p-num">P.{page.pageNumber}</span>
+                    <button className="del-btn-ux" onClick={(e) => { e.stopPropagation(); onRemovePage(page.id); }} title="移除">
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <div className="card-title-ux">{page.customName || page.defaultName}</div>
+                </div>
               </div>
-              <button 
-                className="remove-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemovePage(page.id);
-                }}
-              >
-                &times;
-              </button>
-            </div>
-          ))
+            ))}
+          </Document>
         )}
       </div>
     </div>

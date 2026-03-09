@@ -15,6 +15,7 @@ export interface WindowStoreState {
   restoreWindows: (windows: ReaderWindow[], activeWindowId?: string | null) => void;
   setActiveWindow: (windowId: string) => void;
   swapWithMain: (windowId: string) => void;
+  updateWindow: (windowId: string, partial: Partial<ReaderWindow>) => void;
   windows: ReaderWindow[];
 }
 
@@ -35,236 +36,146 @@ function createMainWindow(pageNumber = 1): ReaderWindow {
   };
 }
 
+/**
+ * 核心同步逻辑：计算窗口变动导致的页面占用差异，更新 heldPages 的 linkedWindowIds
+ */
 function markHeldDiff(previousWindows: ReaderWindow[], nextWindows: ReaderWindow[]): void {
-  const previousMap = new Map<string, { pageNumber: number; windowId: string }>();
-  const nextMap = new Map<string, { pageNumber: number; windowId: string }>();
+  const previousMap = new Map<string, number>();
+  previousWindows.forEach(w => previousMap.set(w.id, w.pageNumber));
+  
+  const nextMap = new Map<string, number>();
+  nextWindows.forEach(w => nextMap.set(w.id, w.pageNumber));
 
-  for (const window of previousWindows) {
-    previousMap.set(window.id, { pageNumber: window.pageNumber, windowId: window.id });
-  }
-
-  for (const window of nextWindows) {
-    nextMap.set(window.id, { pageNumber: window.pageNumber, windowId: window.id });
-  }
-
-  for (const [windowId, previous] of previousMap.entries()) {
-    const next = nextMap.get(windowId);
-
-    if (!next) {
-      heldStore.getState().markHeldPageClosed(previous.pageNumber, windowId);
-      continue;
+  // 处理关闭或页码变更的窗口
+  previousWindows.forEach(w => {
+    const nextPn = nextMap.get(w.id);
+    if (nextPn === undefined) {
+      // 窗口被关闭
+      heldStore.getState().markHeldPageClosed(w.pageNumber, w.id);
+    } else if (nextPn !== w.pageNumber) {
+      // 窗口内页码变了
+      heldStore.getState().markHeldPageClosed(w.pageNumber, w.id);
+      heldStore.getState().markHeldPageOpen(nextPn, w.id);
     }
+  });
 
-    if (next.pageNumber !== previous.pageNumber) {
-      heldStore.getState().markHeldPageClosed(previous.pageNumber, windowId);
-      heldStore.getState().markHeldPageOpen(next.pageNumber, windowId);
+  // 处理新增窗口
+  nextWindows.forEach(w => {
+    if (!previousMap.has(w.id)) {
+      heldStore.getState().markHeldPageOpen(w.pageNumber, w.id);
     }
-  }
-
-  for (const [windowId, next] of nextMap.entries()) {
-    if (!previousMap.has(windowId)) {
-      heldStore.getState().markHeldPageOpen(next.pageNumber, windowId);
-    }
-  }
-}
-
-function buildRestoredWindows(windows: ReaderWindow[]): ReaderWindow[] {
-  if (windows.length === 0) {
-    return [createMainWindow(bookStore.getState().currentPage)];
-  }
-
-  if (windows.some((window) => window.id === 'main')) {
-    return windows;
-  }
-
-  return [createMainWindow(bookStore.getState().currentPage), ...windows];
+  });
 }
 
 const initialWindows = [createMainWindow()];
 
 export const useWindowStore = create<WindowStoreState>((set, get) => ({
   activeWindowId: 'main',
+  windows: initialWindows,
+
   closeWindow: (windowId) => {
-    const state = get();
-    const target = state.windows.find((window) => window.id === windowId);
+    const { windows, activeWindowId } = get();
+    const target = windows.find(w => w.id === windowId);
+    if (!target || !target.canClose) return;
 
-    if (!target || !target.canClose) {
-      return;
-    }
+    const nextWindows = windows.filter(w => w.id !== windowId);
+    markHeldDiff(windows, nextWindows);
 
-    const nextWindows = state.windows
-      .filter((window) => window.id !== windowId)
-      .map((window) => ({
-        ...window,
-        isActive: state.activeWindowId === windowId ? window.id === 'main' : window.isActive,
-      }));
-
-    markHeldDiff(state.windows, nextWindows);
-
-    set(() => ({
-      activeWindowId: state.activeWindowId === windowId ? 'main' : state.activeWindowId,
+    set({
       windows: nextWindows,
-    }));
+      activeWindowId: activeWindowId === windowId ? 'main' : activeWindowId
+    });
   },
+
   openInMain: (pageNumber) => {
-    const state = get();
-    const nextWindows = state.windows.map((window) =>
-      window.id === 'main'
-        ? {
-            ...window,
-            isActive: true,
-            pageNumber,
-            title: createWindowTitle(pageNumber),
-          }
-        : {
-            ...window,
-            isActive: false,
-          },
+    const { windows } = get();
+    const nextWindows = windows.map(w => 
+      w.id === 'main' 
+        ? { ...w, pageNumber, title: createWindowTitle(pageNumber), isActive: true } 
+        : { ...w, isActive: false }
     );
-
-    markHeldDiff(state.windows, nextWindows);
+    markHeldDiff(windows, nextWindows);
     bookStore.getState().setCurrentPage(pageNumber);
-
-    set(() => ({
-      activeWindowId: 'main',
-      windows: nextWindows,
-    }));
+    set({ windows: nextWindows, activeWindowId: 'main' });
   },
+
   openInNewWindow: (pageNumber) => {
-    const state = get();
-    const nextWindowId = uuidv4();
-    const nextZIndex = state.windows.reduce((maxZIndex, window) => Math.max(maxZIndex, window.zIndex), 0) + 1;
-    const nextWindow: ReaderWindow = {
-      canClose: true,
-      dockMode: 'none',
-      id: nextWindowId,
-      isActive: true,
+    const { windows } = get();
+    const id = uuidv4();
+    const nextWindows = [...windows.map(w => ({ ...w, isActive: false })), {
+      id,
+      type: 'floating' as const,
       pageNumber,
       title: createWindowTitle(pageNumber),
-      type: 'floating',
-      zIndex: nextZIndex,
-    };
-    const nextWindows = [...state.windows.map((window) => ({ ...window, isActive: false })), nextWindow];
-
-    markHeldDiff(state.windows, nextWindows);
-
-    set(() => ({
-      activeWindowId: nextWindowId,
-      windows: nextWindows,
-    }));
-
-    return nextWindowId;
+      dockMode: 'none' as const,
+      zIndex: Math.max(...windows.map(w => w.zIndex), 0) + 1,
+      isActive: true,
+      canClose: true,
+      x: 150,
+      y: 150,
+      width: 450,
+      height: 600
+    }];
+    markHeldDiff(windows, nextWindows);
+    set({ windows: nextWindows, activeWindowId: id });
+    return id;
   },
+
   openInSplit: (pageNumber) => {
-    const state = get();
-    const nextWindowId = uuidv4();
-    const nextZIndex = state.windows.reduce((maxZIndex, window) => Math.max(maxZIndex, window.zIndex), 0) + 1;
-    const nextWindow: ReaderWindow = {
-      canClose: true,
-      dockMode: 'right-half',
-      id: nextWindowId,
-      isActive: true,
+    const { windows } = get();
+    const id = uuidv4();
+    const nextWindows = [...windows.map(w => ({ ...w, isActive: false })), {
+      id,
+      type: 'docked' as const,
       pageNumber,
       title: createWindowTitle(pageNumber),
-      type: 'docked',
-      zIndex: nextZIndex,
-    };
-    const nextWindows = [...state.windows.map((window) => ({ ...window, isActive: false })), nextWindow];
-
-    markHeldDiff(state.windows, nextWindows);
-
-    set(() => ({
-      activeWindowId: nextWindowId,
-      windows: nextWindows,
-    }));
-
-    return nextWindowId;
+      dockMode: 'right-half' as const,
+      zIndex: Math.max(...windows.map(w => w.zIndex), 0) + 1,
+      isActive: true,
+      canClose: true
+    }];
+    markHeldDiff(windows, nextWindows);
+    set({ windows: nextWindows, activeWindowId: id });
+    return id;
   },
-  reset: () => {
-    const nextWindows = [createMainWindow(bookStore.getState().currentPage)];
-    markHeldDiff(get().windows, nextWindows);
 
-    set(() => ({
-      activeWindowId: 'main',
-      windows: nextWindows,
-    }));
-  },
-  restoreWindows: (windows, activeWindowId = 'main') => {
-    const state = get();
-    const nextWindows = buildRestoredWindows(windows).map((window) => ({
-      ...window,
-      isActive: window.id === (activeWindowId ?? 'main'),
-    }));
-
-    markHeldDiff(state.windows, nextWindows);
-
-    const mainWindow = nextWindows.find((window) => window.id === 'main');
-
-    if (mainWindow) {
-      bookStore.getState().setCurrentPage(mainWindow.pageNumber);
-    }
-
-    set(() => ({
-      activeWindowId: activeWindowId ?? 'main',
-      windows: nextWindows,
-    }));
-  },
   setActiveWindow: (windowId) => {
-    const state = get();
-
-    if (!state.windows.some((window) => window.id === windowId)) {
-      return;
-    }
-
-    set(() => ({
+    const { windows } = get();
+    set({
       activeWindowId: windowId,
-      windows: state.windows.map((window) => ({
-        ...window,
-        isActive: window.id === windowId,
-      })),
-    }));
+      windows: windows.map(w => ({ ...w, isActive: w.id === windowId }))
+    });
   },
+
   swapWithMain: (windowId) => {
-    const state = get();
-    const mainWindow = state.windows.find((window) => window.id === 'main');
-    const targetWindow = state.windows.find((window) => window.id === windowId);
+    const { windows } = get();
+    const mainWindow = windows.find(w => w.id === 'main');
+    const targetWindow = windows.find(w => w.id === windowId);
+    if (!mainWindow || !targetWindow || windowId === 'main') return;
 
-    if (!mainWindow || !targetWindow || windowId === 'main') {
-      return;
-    }
-
-    const nextWindows = state.windows.map((window) => {
-      if (window.id === 'main') {
-        return {
-          ...window,
-          pageNumber: targetWindow.pageNumber,
-          title: targetWindow.title,
-        };
-      }
-
-      if (window.id === windowId) {
-        return {
-          ...window,
-          pageNumber: mainWindow.pageNumber,
-          title: mainWindow.title,
-        };
-      }
-
-      return window;
+    const nextWindows = windows.map(w => {
+      if (w.id === 'main') return { ...w, pageNumber: targetWindow.pageNumber, title: targetWindow.title };
+      if (w.id === windowId) return { ...w, pageNumber: mainWindow.pageNumber, title: mainWindow.title };
+      return w;
     });
 
-    markHeldDiff(state.windows, nextWindows);
+    markHeldDiff(windows, nextWindows);
     bookStore.getState().setCurrentPage(targetWindow.pageNumber);
-
-    set(() => ({
-      activeWindowId: 'main',
-      windows: nextWindows.map((window) => ({
-        ...window,
-        isActive: window.id === 'main',
-      })),
-    }));
+    set({ windows: nextWindows, activeWindowId: 'main' });
   },
-  windows: initialWindows,
+
+  updateWindow: (windowId, partial) => {
+    const { windows } = get();
+    const nextWindows = windows.map(w => w.id === windowId ? { ...w, ...partial } : w);
+    // 如果页码变了，也需要同步标记
+    if (partial.pageNumber !== undefined) {
+      markHeldDiff(windows, nextWindows);
+    }
+    set({ windows: nextWindows });
+  },
+
+  reset: () => set({ windows: initialWindows, activeWindowId: 'main' }),
+  restoreWindows: (windows, activeWindowId) => set({ windows, activeWindowId: activeWindowId || 'main' }),
 }));
 
 export const windowStore = useWindowStore;
