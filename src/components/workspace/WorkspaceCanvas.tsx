@@ -1,5 +1,10 @@
+<<<<<<< HEAD
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { ReaderWindow } from '../../types/domain';
+=======
+import React, { useState } from 'react';
+import type { ReaderWindow } from '../../types/domain';
+>>>>>>> dev/engine-core-logic
 import { ReaderViewport } from '../reader/ReaderViewport';
 import '../../styles/WorkspaceCanvas.css';
 

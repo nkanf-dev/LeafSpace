@@ -1,5 +1,7 @@
+import { thumbnailStore } from '../stores/thumbnailStore';
 import type { ThumbnailEntry } from '../types/domain';
-import { pdfService, type PDFService } from './PDFService';
+import { pdfService } from './PDFService';
+import type { PDFService } from './PDFService';
 import type {
   ThumbnailRenderSuccess,
   ThumbnailWorkerRequest,
@@ -14,10 +16,9 @@ interface PendingWorkerRequest {
 }
 
 export class ThumbnailService {
-  private readonly entries = new Map<string, ThumbnailEntry>();
   private readonly inflight = new Map<string, Promise<string | undefined>>();
-  private pdf: PDFService;
   private readonly pending = new Map<string, PendingWorkerRequest>();
+  private pdf: PDFService;
   private requestSequence = 0;
   private worker: Worker | null = null;
 
@@ -27,17 +28,16 @@ export class ThumbnailService {
 
   async ensureThumbnail(pageNumber: number, maxWidth = DEFAULT_THUMBNAIL_WIDTH): Promise<string | undefined> {
     const source = this.pdf.getDocumentData();
-    const fingerprint = this.pdf.getDocumentFingerprint();
+    const key = this.getThumbnailKey(pageNumber, maxWidth);
 
-    if (!source || !fingerprint) {
+    if (!source || !key) {
       return undefined;
     }
 
-    const key = this.buildKey(fingerprint, pageNumber, maxWidth);
-    const cached = this.entries.get(key);
+    const cached = thumbnailStore.getState().getEntry(key);
 
     if (cached?.status === 'ready' && cached.blobUrl) {
-      cached.lastAccessedAt = Date.now();
+      thumbnailStore.getState().touchEntry(key);
       return cached.blobUrl;
     }
 
@@ -47,18 +47,11 @@ export class ThumbnailService {
       return pendingRender;
     }
 
-    const entry: ThumbnailEntry = cached ?? {
+    thumbnailStore.getState().markQueued({
       key,
       pageNumber,
       width: maxWidth,
-      height: 0,
-      status: 'queued',
-      lastAccessedAt: Date.now(),
-    };
-
-    entry.status = 'queued';
-    entry.lastAccessedAt = Date.now();
-    this.entries.set(key, entry);
+    });
 
     const renderPromise = this.renderThumbnail({
       id: `${Date.now()}-${++this.requestSequence}`,
@@ -69,39 +62,31 @@ export class ThumbnailService {
       type: 'render',
     })
       .then((payload) => {
-        const current = this.entries.get(key);
+        const current = thumbnailStore.getState().getEntry(key);
 
-        if (!current) {
-          return undefined;
-        }
-
-        if (current.blobUrl) {
+        if (current?.blobUrl) {
           URL.revokeObjectURL(current.blobUrl);
         }
 
-        current.status = 'ready';
-        current.width = payload.width;
-        current.height = payload.height;
-        current.blobUrl = URL.createObjectURL(payload.blob);
-        current.lastAccessedAt = Date.now();
+        const blobUrl = URL.createObjectURL(payload.blob);
+        thumbnailStore.getState().markReady({
+          blobUrl,
+          height: payload.height,
+          key,
+          width: payload.width,
+        });
 
-        return current.blobUrl;
+        return blobUrl;
       })
       .catch((error) => {
-        const current = this.entries.get(key);
-
-        if (current) {
-          current.status = 'error';
-          current.lastAccessedAt = Date.now();
-        }
-
+        thumbnailStore.getState().markError(key);
         throw error;
       })
       .finally(() => {
         this.inflight.delete(key);
       });
 
-    entry.status = 'rendering';
+    thumbnailStore.getState().markRendering(key);
     this.inflight.set(key, renderPromise);
 
     return renderPromise;
@@ -111,25 +96,39 @@ export class ThumbnailService {
     await Promise.all(pageNumbers.map((pageNumber) => this.ensureThumbnail(pageNumber, maxWidth)));
   }
 
+  getEntry(key: string): ThumbnailEntry | undefined {
+    return thumbnailStore.getState().getEntry(key);
+  }
+
+  getThumbnailKey(pageNumber: number, maxWidth = DEFAULT_THUMBNAIL_WIDTH): string | undefined {
+    const fingerprint = this.pdf.getDocumentFingerprint();
+
+    if (!fingerprint) {
+      return undefined;
+    }
+
+    return `${fingerprint}_${pageNumber}_${maxWidth}`;
+  }
+
   releaseThumbnail(key: string): void {
-    const entry = this.entries.get(key);
+    const entry = thumbnailStore.getState().getEntry(key);
 
     if (entry?.blobUrl) {
       URL.revokeObjectURL(entry.blobUrl);
     }
 
-    this.entries.delete(key);
+    thumbnailStore.getState().removeEntry(key);
     this.inflight.delete(key);
   }
 
   dispose(): void {
-    for (const entry of this.entries.values()) {
+    for (const entry of Object.values(thumbnailStore.getState().entries)) {
       if (entry.blobUrl) {
         URL.revokeObjectURL(entry.blobUrl);
       }
     }
 
-    this.entries.clear();
+    thumbnailStore.getState().reset();
     this.inflight.clear();
 
     if (this.worker) {
@@ -146,16 +145,8 @@ export class ThumbnailService {
     this.pending.clear();
   }
 
-  getEntry(key: string): ThumbnailEntry | undefined {
-    return this.entries.get(key);
-  }
-
-  private buildKey(fingerprint: string, pageNumber: number, maxWidth: number): string {
-    return `${fingerprint}_${pageNumber}_${maxWidth}`;
-  }
-
   private cloneBuffer(source: Uint8Array): ArrayBuffer {
-    return source.slice().buffer;
+    return source.slice().buffer as ArrayBuffer;
   }
 
   private ensureWorker(): Worker {
@@ -202,7 +193,7 @@ export class ThumbnailService {
     }
 
     const worker = this.ensureWorker();
-    this.entries.get(request.key)!.status = 'rendering';
+    thumbnailStore.getState().markRendering(request.key);
 
     return new Promise<ThumbnailRenderSuccess>((resolve, reject) => {
       this.pending.set(request.id, { reject, resolve });
