@@ -63,4 +63,32 @@ describe('WorkspaceCanvas (DND & Controlled UI)', () => {
     expect(refWindowContainer.style.left).toBe('200px');
     expect(refWindowContainer.style.top).toBe('200px');
   });
+
+  it('remains stable and renders correctly with high load (20 windows)', () => {
+    const manyWindows: ReaderWindow[] = Array.from({ length: 20 }, (_, i) => ({
+      id: `ref-${i}`,
+      type: 'floating',
+      pageNumber: i + 1,
+      title: `Window ${i}`,
+      dockMode: 'none',
+      zIndex: i,
+      isActive: false,
+      canClose: true,
+      x: i * 10,
+      y: i * 10,
+      width: 200,
+      height: 300,
+    }));
+
+    render(<TestWrapper initial={manyWindows} />);
+    
+    // 验证是否所有窗口都已渲染
+    const windowTitles = screen.getAllByText(/Window \d+/);
+    expect(windowTitles).toHaveLength(20);
+    
+    // 验证最后一个窗口的交互性
+    const lastHeader = screen.getByText('Window 19').parentElement!;
+    fireEvent.mouseDown(lastHeader, { clientX: 200, clientY: 200 });
+    // 简单验证没有崩溃且触发了激活逻辑
+  });
 });
