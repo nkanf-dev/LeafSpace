@@ -1,0 +1,82 @@
+.held-pages-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: #fff;
+  border-left: 1px solid #ddd;
+}
+
+.panel-title {
+  padding: 1rem;
+  margin: 0;
+  border-bottom: 1px solid #eee;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.held-pages-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+
+.empty-state {
+  color: #999;
+  text-align: center;
+  padding: 2rem 1rem;
+  font-size: 0.9rem;
+}
+
+.held-page-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  border-radius: 4px;
+  background-color: #f9f9f9;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  border: 1px solid transparent;
+}
+
+.held-page-item:hover {
+  background-color: #f0f0f0;
+}
+
+.held-page-item.active {
+  background-color: #e6f7ff;
+  border-color: #1890ff;
+}
+
+.held-page-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.page-number {
+  font-size: 0.75rem;
+  font-weight: bold;
+  color: #1890ff;
+}
+
+.page-name {
+  font-size: 0.85rem;
+  color: #333;
+}
+
+.remove-btn {
+  background: none;
+  border: none;
+  color: #ccc;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.25rem;
+}
+
+.remove-btn:hover {
+  color: #ff4d4f;
+}

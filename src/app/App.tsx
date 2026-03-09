@@ -1,42 +1,113 @@
-import './App.css'
+import { useState, useEffect } from 'react';
+import './App.css';
+import { ReaderViewport } from '../components/reader/ReaderViewport';
+import { HeldPagesPanel } from '../components/held-pages/HeldPagesPanel';
+import { QuickFlipOverlay } from '../components/quick-flip/QuickFlipOverlay';
+import type { HeldPage } from '../types/domain';
 
 /**
  * LeafSpace 主应用壳层
- * 由 Agent 0 (Architect) 建立布局骨架
- * Agent 1 (Frontend) 将在此填充 UI 组件
- * Agent 2 (Logic) 将在此注入状态与 Service
+ * 由 Agent 1 (Frontend) 填充 UI 组件并注入初步状态逻辑
  */
 function App() {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages] = useState(100); // 模拟总页数
+  const [isQuickFlipVisible, setIsQuickFlipVisible] = useState(false);
+  const [heldPages, setHeldPages] = useState<HeldPage[]>([
+    {
+      id: '1',
+      pageNumber: 5,
+      defaultName: 'Page 5',
+      createdAt: new Date().toISOString(),
+      isOpen: false
+    },
+    {
+      id: '2',
+      pageNumber: 12,
+      defaultName: 'Page 12',
+      createdAt: new Date().toISOString(),
+      isOpen: false
+    }
+  ]);
+
+  // 处理全局快捷键 (Space 键打开速翻)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === ' ' && !isQuickFlipVisible) {
+        e.preventDefault();
+        setIsQuickFlipVisible(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isQuickFlipVisible]);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    setIsQuickFlipVisible(false);
+  };
+
+  const handleHeldPageClick = (page: HeldPage) => {
+    setCurrentPage(page.pageNumber);
+  };
+
+  const handleRemoveHeldPage = (id: string) => {
+    setHeldPages(prev => prev.filter(p => p.id !== id));
+  };
+
   return (
     <div className="leaf-space-shell">
-      {/* 顶部导航与搜索 (未来由 Agent 1 细化) */}
       <header className="leaf-header">
-        <h1>LeafSpace</h1>
+        <div className="logo">LeafSpace</div>
+        <div className="document-info">Sample PDF Document</div>
+        <button 
+          className="hold-btn"
+          onClick={() => {
+            const newPage: HeldPage = {
+              id: Date.now().toString(),
+              pageNumber: currentPage,
+              defaultName: `Page ${currentPage}`,
+              createdAt: new Date().toISOString(),
+              isOpen: true
+            };
+            if (!heldPages.find(p => p.pageNumber === currentPage)) {
+              setHeldPages([...heldPages, newPage]);
+            }
+          }}
+        >
+          Hold Current Page
+        </button>
       </header>
 
       <main className="leaf-main-container">
-        {/* 主阅读器区域 (Agent 1: ReaderViewport) */}
-        <div className="leaf-reader-viewport">
-          <p>Reader Viewport Placeholder</p>
-        </div>
+        <section className="leaf-reader-viewport">
+          <ReaderViewport initialPage={currentPage} key={currentPage} />
+        </section>
 
-        {/* 夹页面板 (Agent 1: HeldPagesPanel) */}
         <aside className="leaf-held-pages-panel">
-          <p>Held Pages Placeholder</p>
+          <HeldPagesPanel 
+            pages={heldPages.map(p => ({ ...p, isOpen: p.pageNumber === currentPage }))} 
+            onPageClick={handleHeldPageClick}
+            onRemovePage={handleRemoveHeldPage}
+          />
         </aside>
       </main>
 
-      {/* 底部时间轴 (Agent 1: TimelineBar) */}
       <footer className="leaf-timeline-bar">
-        <p>Timeline Placeholder</p>
+        <div className="timeline-info">
+          Page {currentPage} of {totalPages}
+        </div>
       </footer>
 
-      {/* 速翻图层 (Agent 1: QuickFlipOverlay) */}
-      <div className="leaf-quick-flip-overlay" style={{ display: 'none' }}>
-        <p>Quick Flip Overlay Placeholder</p>
-      </div>
+      <QuickFlipOverlay 
+        isVisible={isQuickFlipVisible}
+        onClose={() => setIsQuickFlipVisible(false)}
+        currentPage={currentPage}
+        totalPages={totalPages}
+        onPageChange={handlePageChange}
+      />
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
