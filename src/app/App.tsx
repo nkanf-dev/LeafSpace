@@ -42,12 +42,18 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === ' ' && documentId && !isQuickFlipVisible) {
+      if (e.key === ' ' && documentId) {
         e.preventDefault();
+
+        if (isQuickFlipVisible) {
+          closeQuickFlip();
+          return;
+        }
+
         openQuickFlip(currentPage);
         const pages = Array.from({ length: 15 }, (_, i) => currentPage - 7 + i).filter((p) => p > 0 && p <= totalPages);
         thumbnailService.ensureThumbnails(pages);
-      } else if ((e.key === ' ' || e.key === 'Escape') && isQuickFlipVisible) {
+      } else if (e.key === 'Escape' && isQuickFlipVisible) {
         e.preventDefault();
         closeQuickFlip();
       }
@@ -92,8 +98,8 @@ function App() {
         </div>
       </header>
 
-      <main className="flex min-h-0 flex-1 overflow-hidden">
-        <section className="flex min-h-0 flex-1 flex-col bg-[#edece9]">
+      <main className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#edece9]">
           {documentId ? (
             <WorkspaceCanvas
               windows={windows}

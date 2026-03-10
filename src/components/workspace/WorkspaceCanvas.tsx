@@ -17,8 +17,11 @@ function clamp(value: number, min: number, max: number): number {
 export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWindowClose }) => {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
+  const [isResizingSplit, setIsResizingSplit] = useState(false);
+  const [splitRatio, setSplitRatio] = useState(0.64);
   const dragOffset = useRef({ x: 0, y: 0 });
   const resizeStart = useRef({ x: 0, y: 0, w: 0, h: 0 });
+  const splitResizeStart = useRef({ x: 0, ratio: 0.64 });
   const windowsRef = useRef(windows);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const swapWithMain = useWindowStore(state => state.swapWithMain);
@@ -56,9 +59,23 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
     resizeStart.current = { x: e.clientX, y: e.clientY, w: win.width || 400, h: win.height || 500 };
   };
 
+  const handleSplitResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizingSplit(true);
+    splitResizeStart.current = { x: e.clientX, ratio: splitRatio };
+  };
+
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!workspaceRef.current) return;
     const workspaceRect = workspaceRef.current.getBoundingClientRect();
+
+    if (isResizingSplit) {
+      const deltaX = e.clientX - splitResizeStart.current.x;
+      const nextRatio = splitResizeStart.current.ratio + deltaX / workspaceRect.width;
+      setSplitRatio(clamp(nextRatio, 0.35, 0.8));
+      return;
+    }
 
     if (draggingId) {
       const win = windowsRef.current.find(w => w.id === draggingId);
@@ -87,11 +104,11 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
         });
       }
     }
-  }, [draggingId, resizingId, onWindowUpdate]);
+  }, [draggingId, isResizingSplit, onWindowUpdate, resizingId]);
 
   useEffect(() => {
-    const up = () => { setDraggingId(null); setResizingId(null); };
-    if (draggingId || resizingId) {
+    const up = () => { setDraggingId(null); setResizingId(null); setIsResizingSplit(false); };
+    if (draggingId || resizingId || isResizingSplit) {
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', up);
       document.body.classList.add('is-panning');
@@ -101,18 +118,38 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
       window.removeEventListener('mouseup', up);
       document.body.classList.remove('is-panning');
     };
-  }, [draggingId, resizingId, handleMouseMove]);
+  }, [draggingId, resizingId, isResizingSplit, handleMouseMove]);
+
+  useEffect(() => {
+    if (!dockedWindow) {
+      setIsResizingSplit(false);
+    }
+  }, [dockedWindow]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#edece9]" ref={workspaceRef}>
-      <div className="flex h-full w-full gap-px bg-[var(--border)]">
+      <div className="flex h-full w-full min-w-0 bg-[var(--border)]">
         {mainWindow && (
-          <div className={`min-h-0 flex flex-[1.8] flex-col overflow-hidden bg-[var(--surface)] ${mainWindow.isActive ? '' : ''}`}>
-            <ReaderViewport isMain={true} />
+          <div
+            className={`min-h-0 min-w-0 flex flex-col overflow-hidden bg-[var(--surface)] ${mainWindow.isActive ? '' : ''}`}
+            style={dockedWindow ? { width: `calc(${splitRatio * 100}% - 2px)` } : { width: '100%' }}
+          >
+            <ReaderViewport isMain={true} windowId={mainWindow.id} />
           </div>
         )}
         {dockedWindow && (
-          <div className="min-h-0 flex flex-1 flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--surface)]">
+          <>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整主窗口与分栏宽度"
+              className={`group relative w-1 shrink-0 cursor-col-resize bg-[var(--border)] transition hover:bg-stone-500 ${isResizingSplit ? 'bg-stone-900' : ''}`}
+              onMouseDown={handleSplitResizeStart}
+            >
+              <div className="absolute inset-y-0 left-1/2 w-4 -translate-x-1/2" />
+              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent group-hover:bg-stone-900" />
+            </div>
+            <div className="min-h-0 min-w-0 flex flex-col overflow-hidden bg-[var(--surface)]" style={{ width: `calc(${(1 - splitRatio) * 100}% - 2px)` }}>
             <div className="flex h-9 items-center gap-3 border-b border-[var(--border)] bg-[#f3f1ed] px-4">
               <span className="bg-stone-900 px-1.5 py-0.5 text-[0.6rem] font-extrabold text-white">对比</span>
               <span className="min-w-0 flex-1 truncate text-[0.8rem] font-semibold text-stone-500">{dockedWindow.title}</span>
@@ -129,8 +166,9 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
                 <button type="button" className={dangerIconButton} onClick={() => onWindowClose(dockedWindow.id)} title="关闭"><X size={14} strokeWidth={2.5} /></button>
               </div>
             </div>
-            <ReaderViewport pageNumber={dockedWindow.pageNumber} />
-          </div>
+            <ReaderViewport pageNumber={dockedWindow.pageNumber} windowId={dockedWindow.id} />
+            </div>
+          </>
         )}
       </div>
 
@@ -157,7 +195,7 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-hidden">
-            <ReaderViewport pageNumber={win.pageNumber} />
+            <ReaderViewport pageNumber={win.pageNumber} windowId={win.id} />
           </div>
           <div className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize bg-[linear-gradient(135deg,transparent_50%,var(--border)_50%)] hover:bg-[linear-gradient(135deg,transparent_50%,#1c1917_50%)]" onMouseDown={(e) => handleResizeStart(e, win)} />
         </div>

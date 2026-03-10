@@ -85,6 +85,9 @@ body.is-panning {
 }
 
 .quick-flip-strip {
+  display: flex;
+  align-items: center;
+  min-height: calc(100vh - 9.5rem);
   scrollbar-width: none;
 }
 
@@ -94,10 +97,12 @@ body.is-panning {
 
 .quick-flip-strip .react-pdf__Document {
   display: flex !important;
+  width: max-content;
+  min-height: 100%;
   min-width: max-content;
   align-items: center;
   gap: 2rem;
-  padding: 3rem 45vw;
+  padding: 4rem 45vw;
 }
 
 .react-pdf__Page canvas,
