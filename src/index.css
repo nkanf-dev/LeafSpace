@@ -1,16 +1,108 @@
+@import "tailwindcss";
+
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.5;
   font-weight: 400;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  --app-bg: #f5f1ea;
+  --surface: #fcfaf6;
+  --surface-strong: #f1ebe2;
+  --surface-muted: #ece5dc;
+  --ink: #1f2937;
+  --muted: #6b7280;
+  --border: #ddd3c5;
+  --accent: #2563eb;
+  --danger: #dc2626;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow: hidden;
+  background-color: var(--app-bg);
+  background-image: linear-gradient(180deg, #faf7f2 0%, var(--app-bg) 100%);
+  color: var(--ink);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 2px;
+}
+
+body.is-panning {
+  user-select: none !important;
+  cursor: grabbing !important;
+}
+
+::selection {
+  background: rgba(37, 99, 235, 0.18);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(236, 229, 220, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.65);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.8);
+  background-clip: padding-box;
+}
+
+.quick-flip-strip {
+  scrollbar-width: none;
+}
+
+.quick-flip-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.quick-flip-strip .react-pdf__Document {
+  display: flex !important;
+  min-width: max-content;
+  align-items: center;
+  gap: 2rem;
+  padding: 3rem 45vw;
+}
+
+.react-pdf__Page canvas,
+.react-pdf__Thumbnail canvas {
+  display: block;
+  max-width: 100%;
+  height: auto !important;
 }

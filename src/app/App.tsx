@@ -1,5 +1,4 @@
 import { useEffect, useRef, useCallback } from 'react';
-import './App.css';
 import { WorkspaceCanvas } from '../components/workspace/WorkspaceCanvas.tsx';
 import { HeldPagesPanel } from '../components/held-pages/HeldPagesPanel.tsx';
 import { QuickFlipOverlay } from '../components/quick-flip/QuickFlipOverlay.tsx';
@@ -11,6 +10,13 @@ import { useWindowStore } from '../stores/windowStore';
 import { useQuickFlipStore } from '../stores/quickFlipStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import { thumbnailService } from '../services/ThumbnailService';
+import type { ReaderWindow } from '../types/domain';
+
+const solidButtonClasses =
+  'border border-stone-900 bg-stone-900 px-4 py-2 text-[0.85rem] font-semibold text-white transition hover:-translate-y-px hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0';
+
+const outlineButtonClasses =
+  'border border-stone-900 bg-transparent px-4 py-2 text-[0.85rem] font-semibold text-stone-900 transition hover:-translate-y-px hover:bg-stone-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0';
 
 function App() {
   const { currentPage, totalPages, setCurrentPage, loadDocument, documentId, error: bookError } = useBookStore();
@@ -18,7 +24,7 @@ function App() {
   const { windows, updateWindow, closeWindow, openInNewWindow, setActiveWindow } = useWindowStore();
   const { isOpen: isQuickFlipVisible, close: closeQuickFlip, open: openQuickFlip } = useQuickFlipStore();
   const { saveWorkspace, restoreWorkspace, status: workspaceStatus } = useWorkspaceStore();
-  
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -39,96 +45,105 @@ function App() {
       if (e.key === ' ' && documentId && !isQuickFlipVisible) {
         e.preventDefault();
         openQuickFlip(currentPage);
-        const pages = Array.from({ length: 15 }, (_, i) => currentPage - 7 + i).filter(p => p > 0 && p <= totalPages);
+        const pages = Array.from({ length: 15 }, (_, i) => currentPage - 7 + i).filter((p) => p > 0 && p <= totalPages);
         thumbnailService.ensureThumbnails(pages);
       } else if ((e.key === ' ' || e.key === 'Escape') && isQuickFlipVisible) {
         e.preventDefault();
         closeQuickFlip();
       }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [documentId, isQuickFlipVisible, currentPage, totalPages, openQuickFlip, closeQuickFlip]);
 
   return (
-    <div className="leaf-space-shell kindle-theme">
-      <header className="leaf-header">
-        <div className="logo-section">
-          <span className="logo-text">LeafSpace</span>
-          {workspaceStatus === 'restoring' && <span className="status-badge">正在恢复布局...</span>}
-        </div>
-        
-        <div className="center-info">
-          {bookError ? (
-            <span className="error-text">文件加载失败</span>
-          ) : documentId ? (
-            <span className="reading-title">正在阅读模式</span>
-          ) : (
-            <span className="welcome-text">欢迎使用深度阅读空间</span>
+    <div className="flex h-screen w-screen flex-col bg-[var(--app-bg)] text-[var(--ink)]">
+      <header className="flex h-14 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-6">
+        <div className="flex items-center gap-3">
+          <span className="text-[1.4rem] font-extrabold italic tracking-[-0.03em]" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>
+            LeafSpace
+          </span>
+          {workspaceStatus === 'restoring' && (
+            <span className="border border-[var(--border)] bg-stone-100 px-2 py-1 text-xs text-stone-600">正在恢复布局...</span>
           )}
         </div>
 
-        <div className="header-actions">
-          <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".pdf" style={{ display: 'none' }} />
-          <button onClick={() => fileInputRef.current?.click()} className="kindle-btn">导入书籍</button>
-          <button 
-            onClick={() => documentId && saveWorkspace(documentId)} 
-            disabled={!documentId}
-            className="kindle-btn outline"
+        <div className="flex-1 px-6 text-center text-sm text-stone-600">
+          {bookError ? (
+            <span>文件加载失败</span>
+          ) : documentId ? (
+            <span>正在阅读第 {currentPage} 页</span>
+          ) : (
+            <span>欢迎使用页境阅读</span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".pdf" className="hidden" />
+          <button onClick={() => fileInputRef.current?.click()} className={solidButtonClasses}>导入书籍</button>
+          <button
+            onClick={() => documentId && saveWorkspace(documentId)}
+            disabled={!documentId || workspaceStatus === 'saving' || workspaceStatus === 'restoring'}
+            className={outlineButtonClasses}
           >
             保存现场
           </button>
         </div>
       </header>
 
-      <main className="leaf-main-container">
-        <section className="leaf-workspace-area">
+      <main className="flex min-h-0 flex-1 overflow-hidden">
+        <section className="flex min-h-0 flex-1 flex-col bg-[#edece9]">
           {documentId ? (
-            <WorkspaceCanvas 
-              windows={windows} 
-              onWindowUpdate={(win) => {
-                 updateWindow(win.id, win);
-                 if (win.isActive) setActiveWindow(win.id);
+            <WorkspaceCanvas
+              windows={windows}
+              onWindowUpdate={(win: ReaderWindow) => {
+                updateWindow(win.id, win);
+                if (win.isActive) setActiveWindow(win.id);
               }}
               onWindowClose={closeWindow}
             />
           ) : (
-            <div className="welcome-screen">
-              <div className="hero">
-                <h1>静谧阅读</h1>
-                <p>为扫描版 PDF 打造的空间化阅读体验。</p>
-                <button onClick={() => fileInputRef.current?.click()} className="kindle-btn large">开启您的阅读之旅</button>
+            <div className="flex h-full w-full items-center justify-center bg-[var(--surface)]">
+              <div className="max-w-[600px] px-10 text-center">
+                <h1 className="mb-5 text-[3.5rem] font-extrabold tracking-[-0.04em]" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>
+                  页境阅读
+                </h1>
+                <p className="mb-10 text-[1.2rem] leading-7 text-stone-500">为扫描版 PDF 打造的空间化阅读体验。</p>
+                <button onClick={() => fileInputRef.current?.click()} className="border border-stone-900 bg-stone-900 px-10 py-3 text-[1.1rem] font-semibold text-white transition hover:-translate-y-px hover:bg-stone-800">
+                  开启您的阅读之旅
+                </button>
               </div>
             </div>
           )}
         </section>
 
-        <aside className="leaf-held-pages-panel">
-          <HeldPagesPanel 
-            pages={heldPages} 
+        <aside className="w-[300px] shrink-0 border-l border-[var(--border)] bg-[var(--surface)]">
+          <HeldPagesPanel
+            pages={heldPages}
             onPageClick={(p) => openInNewWindow(p.pageNumber)}
             onRemovePage={(id) => {
-              const p = heldPages.find(pg => pg.id === id);
-              if (p) unholdPage(p.pageNumber);
+              const page = heldPages.find((pg) => pg.id === id);
+              if (page) unholdPage(page.pageNumber);
             }}
           />
         </aside>
       </main>
 
-      <footer className="leaf-timeline-bar">
-        <TimelineBar 
-          currentPage={currentPage} 
-          totalPages={totalPages} 
+      <footer className="h-16 shrink-0 border-t border-[var(--border)] bg-[var(--surface)]">
+        <TimelineBar
+          currentPage={currentPage}
+          totalPages={totalPages}
           onPageClick={(p) => {
             setCurrentPage(p);
             updateWindow('main', { pageNumber: p, title: `第 ${p} 页` });
-          }} 
-          markers={heldPages.map(p => p.pageNumber)}
+          }}
+          markers={heldPages.map((p) => p.pageNumber)}
         />
       </footer>
 
       {isQuickFlipVisible && (
-        <QuickFlipOverlay 
+        <QuickFlipOverlay
           isVisible={isQuickFlipVisible}
           onClose={closeQuickFlip}
           currentPage={currentPage}

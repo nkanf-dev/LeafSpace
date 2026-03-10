@@ -4,7 +4,6 @@ import { useBookStore } from '../../stores/bookStore';
 import { MousePointer2, Hand, ZoomIn, ZoomOut } from 'lucide-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
-import '../../styles/ReaderViewport.css';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -102,49 +101,64 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false }) 
 
   const stopPanning = () => setIsPanning(false);
 
-  const file = useMemo(() => documentUrl ? { data: documentUrl } : null, [documentUrl]);
+  const file = useMemo(() => documentUrl ?? null, [documentUrl]);
   const options = useMemo(() => ({
     cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
     cMapPacked: true,
   }), []);
 
+  const modeButtonClasses = (active: boolean) =>
+    `flex h-7 w-7 items-center justify-center text-stone-500 transition ${active ? 'bg-white text-stone-900 shadow-sm' : 'hover:bg-black/5 hover:text-stone-900'}`;
+
   return (
-    <div className={`kindle-viewport ${isMain ? 'is-main' : 'is-ref'} interaction-${mode}`}>
-      <div className="kindle-viewer-header">
-        <div className="toolbar-left-group">
-          <div className="mode-switcher">
-            <button className={`mode-btn ${mode === 'pointer' ? 'active' : ''}`} onClick={() => setMode('pointer')} title="滚动模式">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--surface)]">
+      <div className="flex h-11 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-4">
+        <div className="flex items-center gap-3">
+          <div className="flex bg-[#f0ede9] p-[2px]">
+            <button className={modeButtonClasses(mode === 'pointer')} onClick={() => setMode('pointer')} title="滚动模式">
               <MousePointer2 size={16} strokeWidth={2.5} />
             </button>
-            <button className={`mode-btn ${mode === 'grab' ? 'active' : ''}`} onClick={() => setMode('grab')} title="抓手模式">
+            <button className={modeButtonClasses(mode === 'grab')} onClick={() => setMode('grab')} title="抓手模式">
               <Hand size={16} strokeWidth={2.5} />
             </button>
           </div>
-          <div className="badge">{isMain ? '主视角' : `参考 P.${activePage}`}</div>
+          <div className="text-xs font-medium text-stone-600">
+            {isMain ? '主视角' : `参考 P.${activePage}`}
+          </div>
         </div>
-        <div className="controls">
-          <button className="ux-btn" onClick={() => setScale(s => Math.max(0.1, s * 0.8))}><ZoomOut size={14} /></button>
-          <span className="scale-val">{Math.round(scale * 100)}%</span>
-          <button className="ux-btn" onClick={() => setScale(s => Math.min(8, s * 1.2))}><ZoomIn size={14} /></button>
+
+        <div className="flex items-center gap-2 text-sm text-stone-500">
+          <button className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9]" onClick={() => setScale((value) => Math.max(0.1, value * 0.8))}><ZoomOut size={14} /></button>
+          <span className="text-[0.75rem] text-stone-700">{Math.round(scale * 100)}%</span>
+          <button className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9]" onClick={() => setScale((value) => Math.min(8, value * 1.2))}><ZoomIn size={14} /></button>
         </div>
       </div>
 
       <div 
         ref={containerRef}
-        className="kindle-scroll-canvas" 
+        className="flex flex-1 overflow-auto bg-[#edece9]"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={stopPanning}
         onMouseLeave={stopPanning}
-        style={{ cursor: mode === 'grab' ? (isPanning ? 'grabbing' : 'grab') : 'default', overflow: mode === 'grab' ? 'hidden' : 'auto' }}
+        style={{ cursor: mode === 'grab' ? (isPanning ? 'grabbing' : 'grab') : 'default', touchAction: mode === 'grab' ? 'none' : 'auto' }}
       >
-        <div className="canvas-centering-fix">
+        <div className="m-auto flex min-w-max justify-center px-10 py-[60px]">
           {file ? (
-            <Document file={documentUrl} options={options} loading={<div className="kindle-status-loading">正在渲染...</div>}>
-              <Page pageNumber={activePage} scale={scale} className="kindle-page-rendering" renderTextLayer={true} />
+            <Document
+              file={file}
+              options={options}
+              loading={<div className="mt-24 text-sm italic text-stone-500" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>正在渲染...</div>}
+            >
+              <Page
+                pageNumber={activePage}
+                scale={scale}
+                className="border border-[#e0ddd5] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.05),0_30px_100px_rgba(0,0,0,0.1)]"
+                renderTextLayer={true}
+              />
             </Document>
           ) : (
-            <div className="kindle-status-empty">等待载入...</div>
+            <div className="mt-24 text-sm text-stone-500">等待载入...</div>
           )}
         </div>
       </div>
