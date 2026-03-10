@@ -10,6 +10,7 @@ import { useHeldStore } from '../stores/heldStore';
 import { useWindowStore } from '../stores/windowStore';
 import { useQuickFlipStore } from '../stores/quickFlipStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
+import { useRecentBooksStore } from '../stores/recentBooksStore';
 import { thumbnailService } from '../services/ThumbnailService';
 
 function App() {
@@ -18,21 +19,39 @@ function App() {
   const { windows, updateWindow, closeWindow, openInNewWindow, setActiveWindow } = useWindowStore();
   const { isOpen: isQuickFlipVisible, close: closeQuickFlip, open: openQuickFlip } = useQuickFlipStore();
   const { saveWorkspace, restoreWorkspace, status: workspaceStatus } = useWorkspaceStore();
+  const { books: recentBooks, loadBooks: loadRecentBooks, addBook: addRecentBook } = useRecentBooksStore();
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingFileNameRef = useRef<string>('');
+
+  // Load recent books on mount
+  useEffect(() => {
+    loadRecentBooks();
+  }, [loadRecentBooks]);
 
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      pendingFileNameRef.current = file.name;
       try {
         await loadDocument(file);
-        const newId = useBookStore.getState().documentId;
-        if (newId) await restoreWorkspace(newId);
+        const state = useBookStore.getState();
+        const newId = state.documentId;
+        if (newId) {
+          await restoreWorkspace(newId);
+          await addRecentBook({
+            documentId: newId,
+            fileName: file.name,
+            totalPages: state.totalPages,
+          });
+        }
       } catch (err) {
         console.error('Workflow Error:', err);
       }
+      // Reset input so the same file can be re-selected
+      e.target.value = '';
     }
-  }, [loadDocument, restoreWorkspace]);
+  }, [loadDocument, restoreWorkspace, addRecentBook]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -56,6 +75,7 @@ function App() {
         <div className="logo-section">
           <span className="logo-text">LeafSpace</span>
           {workspaceStatus === 'restoring' && <span className="status-badge">正在恢复布局...</span>}
+          {workspaceStatus === 'saving' && <span className="status-badge">正在保存...</span>}
         </div>
         
         <div className="center-info">
@@ -73,7 +93,7 @@ function App() {
           <button onClick={() => fileInputRef.current?.click()} className="kindle-btn">导入书籍</button>
           <button 
             onClick={() => documentId && saveWorkspace(documentId)} 
-            disabled={!documentId}
+            disabled={!documentId || workspaceStatus === 'saving'}
             className="kindle-btn outline"
           >
             保存现场
@@ -99,6 +119,28 @@ function App() {
                 <p>为扫描版 PDF 打造的空间化阅读体验。</p>
                 <button onClick={() => fileInputRef.current?.click()} className="kindle-btn large">开启您的阅读之旅</button>
               </div>
+
+              {recentBooks.length > 0 && (
+                <div className="recent-books">
+                  <h2 className="recent-books-title">最近打开</h2>
+                  <ul className="recent-books-list">
+                    {recentBooks.map((book) => (
+                      <li key={book.documentId} className="recent-book-item">
+                        <button
+                          className="recent-book-btn"
+                          onClick={() => fileInputRef.current?.click()}
+                          title={`重新导入文件以恢复 "${book.fileName}" 的阅读状态`}
+                        >
+                          <span className="recent-book-name">{book.fileName}</span>
+                          <span className="recent-book-meta">
+                            {book.totalPages} 页 · {new Date(book.lastOpenedAt).toLocaleDateString('zh-CN')}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </section>

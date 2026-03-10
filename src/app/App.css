@@ -122,3 +122,82 @@ body, html {
 
 .leaf-held-pages-panel { width: 300px; border-left: 1px solid var(--kindle-border); background: var(--kindle-paper); flex-shrink: 0; }
 .leaf-timeline-bar { height: 64px; background: var(--kindle-paper); border-top: 1px solid var(--kindle-border); flex-shrink: 0; }
+
+/* Recently opened books */
+.recent-books {
+  margin-top: 48px;
+  width: 100%;
+  max-width: 560px;
+  text-align: left;
+}
+
+.recent-books-title {
+  font-family: var(--font-serif);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--kindle-gray);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--kindle-border);
+}
+
+.recent-books-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.recent-book-item {
+  width: 100%;
+}
+
+.recent-book-btn {
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 10px 14px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+  font-family: var(--font-serif);
+}
+
+.recent-book-btn:hover {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: var(--kindle-border);
+}
+
+.recent-book-name {
+  font-size: 0.95rem;
+  color: var(--kindle-ink);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.recent-book-meta {
+  font-size: 0.78rem;
+  color: var(--kindle-gray);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.status-badge {
+  margin-left: 8px;
+  font-size: 0.75rem;
+  color: var(--kindle-gray);
+  font-style: italic;
+}
+.kindle-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }

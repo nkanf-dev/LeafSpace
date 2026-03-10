@@ -62,3 +62,11 @@ export interface ThumbnailEntry {
   status: 'idle' | 'queued' | 'rendering' | 'ready' | 'error';
   lastAccessedAt: number;
 }
+
+export interface RecentBook {
+  documentId: string;
+  fileName: string;
+  totalPages: number;
+  fileData?: Uint8Array;
+  lastOpenedAt: string;
+}
