@@ -4,11 +4,14 @@
   --kindle-gray: #6b7280;
   --kindle-border: #e8e4e0;
   --kindle-accent: #4a90e2;
+  --kindle-subtle: #c8c4be;
+  --kindle-danger: #ef4444;
   --font-serif: "Georgia", "Times New Roman", serif;
 }
 
-/* 拖拽时全局禁止选中 */
+/* 拖拽/平移时全局禁止选中 */
 body.is-dragging { user-select: none !important; cursor: grabbing !important; }
+body.is-panning { user-select: none !important; cursor: grabbing !important; }
 
 /* 适配 UI 风格的滚动条 */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -64,6 +67,7 @@ body, html {
 .kindle-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
 .kindle-btn:active { transform: scale(0.95); }
 .kindle-btn.outline { background: transparent; color: var(--kindle-ink); border: 1px solid var(--kindle-ink); }
+.kindle-btn.outline:hover { background: var(--kindle-ink); color: #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
 
 .leaf-main-container {
   flex: 1;
