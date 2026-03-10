@@ -24,6 +24,13 @@ export interface HeldPage {
   linkedWindowIds: string[]; // 追踪该页面在哪些窗口中被打开
 }
 
+export interface ViewportState {
+  mode?: 'grab' | 'pointer';
+  scale?: number;
+  scrollLeft?: number;
+  scrollTop?: number;
+}
+
 export type WindowType = 'main' | 'floating' | 'docked';
 export type DockMode = 'none' | 'left-half' | 'right-half' | 'grid';
 
@@ -40,6 +47,8 @@ export interface ReaderWindow {
   y?: number;
   width?: number;
   height?: number;
+  splitRatio?: number;
+  viewport?: ViewportState;
 }
 
 export interface WorkspaceSnapshot {
@@ -51,6 +60,15 @@ export interface WorkspaceSnapshot {
   heldPages: HeldPage[];
   windows: ReaderWindow[];
   savedAt: string;
+}
+
+export interface RecentBookEntry {
+  documentId: string;
+  fileName: string;
+  totalPages: number;
+  fileSize: number;
+  lastOpenedAt: string;
+  lastSavedAt?: string;
 }
 
 export interface ThumbnailEntry {

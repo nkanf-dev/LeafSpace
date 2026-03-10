@@ -8,6 +8,7 @@ import type { ReaderWindow } from '../types/domain';
 export interface WindowStoreState {
   activeWindowId: string | null;
   closeWindow: (windowId: string) => void;
+  closeWindowsForPage: (pageNumber: number) => void;
   openInMain: (pageNumber: number) => void;
   openInNewWindow: (pageNumber: number) => string;
   openInSplit: (pageNumber: number) => string;
@@ -32,6 +33,12 @@ function createMainWindow(pageNumber = 1): ReaderWindow {
     pageNumber,
     title: createWindowTitle(pageNumber),
     type: 'main',
+    viewport: {
+      mode: 'grab',
+      scale: 1,
+      scrollLeft: 0,
+      scrollTop: 0,
+    },
     zIndex: 1,
   };
 }
@@ -87,6 +94,23 @@ export const useWindowStore = create<WindowStoreState>((set, get) => ({
     });
   },
 
+  closeWindowsForPage: (pageNumber) => {
+    const { windows, activeWindowId } = get();
+    const closableIds = windows.filter((window) => window.canClose && window.pageNumber === pageNumber).map((window) => window.id);
+
+    if (closableIds.length === 0) {
+      return;
+    }
+
+    const nextWindows = windows.filter((window) => !closableIds.includes(window.id));
+    markHeldDiff(windows, nextWindows);
+
+    set({
+      activeWindowId: activeWindowId && closableIds.includes(activeWindowId) ? 'main' : activeWindowId,
+      windows: nextWindows,
+    });
+  },
+
   openInMain: (pageNumber) => {
     const { windows } = get();
     const nextWindows = windows.map(w => 
@@ -114,7 +138,13 @@ export const useWindowStore = create<WindowStoreState>((set, get) => ({
       x: 150,
       y: 150,
       width: 450,
-      height: 600
+      height: 600,
+      viewport: {
+        mode: 'grab' as const,
+        scale: 1,
+        scrollLeft: 0,
+        scrollTop: 0,
+      },
     }];
     markHeldDiff(windows, nextWindows);
     set({ windows: nextWindows, activeWindowId: id });
@@ -132,7 +162,14 @@ export const useWindowStore = create<WindowStoreState>((set, get) => ({
       dockMode: 'right-half' as const,
       zIndex: Math.max(...windows.map(w => w.zIndex), 0) + 1,
       isActive: true,
-      canClose: true
+      canClose: true,
+      splitRatio: 0.64,
+      viewport: {
+        mode: 'grab' as const,
+        scale: 1,
+        scrollLeft: 0,
+        scrollTop: 0,
+      },
     }];
     markHeldDiff(windows, nextWindows);
     set({ windows: nextWindows, activeWindowId: id });
@@ -174,8 +211,8 @@ export const useWindowStore = create<WindowStoreState>((set, get) => ({
     set({ windows: nextWindows });
   },
 
-  reset: () => set({ windows: initialWindows, activeWindowId: 'main' }),
-  restoreWindows: (windows, activeWindowId) => set({ windows, activeWindowId: activeWindowId || 'main' }),
+  reset: () => set({ windows: [createMainWindow()], activeWindowId: 'main' }),
+  restoreWindows: (windows, activeWindowId) => set({ windows: windows.length > 0 ? windows : [createMainWindow()], activeWindowId: activeWindowId || 'main' }),
 }));
 
 export const windowStore = useWindowStore;

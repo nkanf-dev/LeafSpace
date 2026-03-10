@@ -23,15 +23,20 @@ type InteractionMode = 'grab' | 'pointer';
 export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, windowId }) => {
   const documentUrl = useBookStore(state => state.documentUrl);
   const globalCurrentPage = useBookStore(state => state.currentPage);
+  const globalScale = useBookStore(state => state.scale);
   const totalPages = useBookStore(state => state.totalPages);
   const setCurrentPage = useBookStore(state => state.setCurrentPage);
+  const setGlobalScale = useBookStore(state => state.setScale);
   const holdPage = useHeldStore(state => state.holdPage);
+  const currentWindow = useWindowStore(state => state.windows.find((candidate) => candidate.id === (windowId ?? 'main')));
   const updateWindow = useWindowStore(state => state.updateWindow);
   const setActiveWindow = useWindowStore(state => state.setActiveWindow);
   const activePage = isMain ? globalCurrentPage : (pageNumber || 1);
+  const storedMode = currentWindow?.viewport?.mode ?? 'grab';
+  const storedScale = isMain ? globalScale : (currentWindow?.viewport?.scale ?? 1);
   
-  const [scale, setScale] = useState(isMain ? 1.3 : 1.0);
-  const [mode, setMode] = useState<InteractionMode>('grab');
+  const [scale, setScale] = useState(storedScale);
+  const [mode, setMode] = useState<InteractionMode>(storedMode);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const contentFrameRef = useRef<HTMLDivElement>(null);
@@ -41,10 +46,49 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   const startPos = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
   const panTarget = useRef({ scrollLeft: 0, scrollTop: 0 });
   const panAnimationFrame = useRef<number | null>(null);
+  const lastPersistedScroll = useRef({ left: 0, top: 0 });
   
   // 用于存储缩放中心的物理参考点
   const zoomPivot = useRef<{ x: number, y: number, scrollX: number, scrollY: number, oldScale: number } | null>(null);
   const zoomCorrectionFrame = useRef<number | null>(null);
+
+  useEffect(() => {
+    setMode(storedMode);
+  }, [storedMode]);
+
+  useEffect(() => {
+    setScale(storedScale);
+  }, [storedScale]);
+
+  const persistViewport = useCallback((partial: Record<string, number | string>) => {
+    if (!windowId) {
+      return;
+    }
+
+    const container = containerRef.current;
+    const nextViewport = {
+      ...currentWindow?.viewport,
+      scrollLeft: container?.scrollLeft ?? currentWindow?.viewport?.scrollLeft ?? 0,
+      scrollTop: container?.scrollTop ?? currentWindow?.viewport?.scrollTop ?? 0,
+      ...partial,
+    };
+
+    updateWindow(windowId, { viewport: nextViewport });
+  }, [currentWindow?.viewport, updateWindow, windowId]);
+
+  const updateScale = useCallback((updater: number | ((value: number) => number)) => {
+    const currentScale = isMain ? globalScale : scale;
+    const nextScale = typeof updater === 'function' ? updater(currentScale) : updater;
+    const clampedScale = Math.min(8, Math.max(0.1, nextScale));
+
+    if (isMain) {
+      setGlobalScale(clampedScale);
+    } else {
+      setScale(clampedScale);
+    }
+
+    persistViewport({ scale: clampedScale });
+  }, [globalScale, isMain, persistViewport, scale, setGlobalScale]);
 
   const cancelPanAnimation = useCallback(() => {
     if (panAnimationFrame.current !== null) {
@@ -118,6 +162,24 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     updateContentAlignment();
   }, [activePage, scale, updateContentAlignment]);
 
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+
+    if (!container || !currentWindow?.viewport) {
+      return;
+    }
+
+    const targetLeft = currentWindow.viewport.scrollLeft ?? 0;
+    const targetTop = currentWindow.viewport.scrollTop ?? 0;
+
+    if (Math.abs(container.scrollLeft - targetLeft) > 1 || Math.abs(container.scrollTop - targetTop) > 1) {
+      container.scrollLeft = targetLeft;
+      container.scrollTop = targetTop;
+      lastPersistedScroll.current = { left: targetLeft, top: targetTop };
+      syncPanTargetToContainer();
+    }
+  }, [activePage, currentWindow?.viewport, scale, syncPanTargetToContainer]);
+
   useEffect(() => {
     const container = containerRef.current;
     const contentFrame = contentFrameRef.current;
@@ -169,7 +231,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
 
         const factor = 1.15;
         const delta = e.deltaY > 0 ? 1 / factor : factor;
-        setScale(s => Math.min(8, Math.max(0.1, s * delta)));
+        updateScale((value) => value * delta);
       }
     };
 
@@ -243,6 +305,27 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     ensurePanAnimation();
   };
 
+  const handleScroll = useCallback(() => {
+    if (!windowId || !containerRef.current) {
+      return;
+    }
+
+    const nextLeft = containerRef.current.scrollLeft;
+    const nextTop = containerRef.current.scrollTop;
+
+    if (Math.abs(lastPersistedScroll.current.left - nextLeft) < 1 && Math.abs(lastPersistedScroll.current.top - nextTop) < 1) {
+      return;
+    }
+
+    lastPersistedScroll.current = { left: nextLeft, top: nextTop };
+    persistViewport({ scrollLeft: nextLeft, scrollTop: nextTop });
+  }, [persistViewport, windowId]);
+
+  const handleModeChange = useCallback((nextMode: InteractionMode) => {
+    setMode(nextMode);
+    persistViewport({ mode: nextMode });
+  }, [persistViewport]);
+
   useEffect(() => () => {
     cancelPanAnimation();
     if (zoomCorrectionFrame.current !== null) {
@@ -304,10 +387,10 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
       <div className="flex h-11 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-4">
         <div className="flex items-center gap-3">
           <div className="flex bg-[#f0ede9] p-[2px]">
-            <button className={modeButtonClasses(mode === 'pointer')} onClick={() => setMode('pointer')} title="滚动模式">
+            <button className={modeButtonClasses(mode === 'pointer')} onClick={() => handleModeChange('pointer')} title="滚动模式">
               <MousePointer2 size={16} strokeWidth={2.5} />
             </button>
-            <button className={modeButtonClasses(mode === 'grab')} onClick={() => setMode('grab')} title="抓手模式">
+            <button className={modeButtonClasses(mode === 'grab')} onClick={() => handleModeChange('grab')} title="抓手模式">
               <Hand size={16} strokeWidth={2.5} />
             </button>
           </div>
@@ -317,9 +400,9 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
         </div>
 
         <div className="flex items-center gap-2 text-sm text-stone-500">
-          <button className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9]" onClick={() => setScale((value) => Math.max(0.1, value * 0.8))}><ZoomOut size={14} /></button>
+          <button className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9]" onClick={() => updateScale((value) => value * 0.8)}><ZoomOut size={14} /></button>
           <span className="text-[0.75rem] text-stone-700">{Math.round(scale * 100)}%</span>
-          <button className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9]" onClick={() => setScale((value) => Math.min(8, value * 1.2))}><ZoomIn size={14} /></button>
+          <button className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9]" onClick={() => updateScale((value) => value * 1.2)}><ZoomIn size={14} /></button>
         </div>
       </div>
 
@@ -334,6 +417,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
         onFocus={handleViewportFocus}
         onMouseDownCapture={handleViewportFocus}
         onKeyDown={handleViewportKeyDown}
+        onScroll={handleScroll}
         style={{ cursor: mode === 'grab' ? (isPanning ? 'grabbing' : 'grab') : 'default', touchAction: mode === 'grab' ? 'none' : 'auto' }}
       >
         <div

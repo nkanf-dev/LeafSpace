@@ -43,6 +43,12 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
   const mainWindow = windows.find(w => w.type === 'main');
   const floatingWindows = windows.filter(w => w.type !== 'main' && w.dockMode === 'none');
 
+  useEffect(() => {
+    if (dockedWindow?.splitRatio) {
+      setSplitRatio(clamp(dockedWindow.splitRatio, 0.35, 0.8));
+    }
+  }, [dockedWindow?.id, dockedWindow?.splitRatio]);
+
   const handleMouseDown = (e: React.MouseEvent, win: ReaderWindow) => {
     if (win.type === 'main' || win.dockMode !== 'none') return;
     e.preventDefault();
@@ -73,7 +79,13 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
     if (isResizingSplit) {
       const deltaX = e.clientX - splitResizeStart.current.x;
       const nextRatio = splitResizeStart.current.ratio + deltaX / workspaceRect.width;
-      setSplitRatio(clamp(nextRatio, 0.35, 0.8));
+      const clampedRatio = clamp(nextRatio, 0.35, 0.8);
+      setSplitRatio(clampedRatio);
+
+      if (dockedWindow) {
+        onWindowUpdate({ ...dockedWindow, splitRatio: clampedRatio });
+      }
+
       return;
     }
 
@@ -104,7 +116,7 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
         });
       }
     }
-  }, [draggingId, isResizingSplit, onWindowUpdate, resizingId]);
+  }, [dockedWindow, draggingId, isResizingSplit, onWindowUpdate, resizingId]);
 
   useEffect(() => {
     const up = () => { setDraggingId(null); setResizingId(null); setIsResizingSplit(false); };
@@ -186,7 +198,7 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
               <button
                 type="button"
                 className={surfaceIconButton}
-                onClick={() => onWindowUpdate({ ...win, dockMode: 'right-half', x: undefined, y: undefined, width: undefined, height: undefined })}
+                onClick={() => onWindowUpdate({ ...win, dockMode: 'right-half', splitRatio: win.splitRatio ?? 0.64, x: undefined, y: undefined, width: undefined, height: undefined })}
                 title="吸附"
               >
                 <Columns2 size={14} strokeWidth={2.5} />
