@@ -29,6 +29,8 @@
   transition: all 0.2s;
 }
 
+.mode-btn:hover:not(.active) { background: rgba(0,0,0,0.06); color: var(--kindle-ink); }
+
 .mode-btn.active {
   background: #fff; color: var(--kindle-ink);
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
@@ -39,7 +41,11 @@
   border-radius: 4px; color: var(--kindle-ink);
   padding: 4px 10px; cursor: pointer;
   font-family: var(--font-serif); font-size: 0.75rem;
+  transition: all 0.2s;
 }
+
+.ux-btn:hover { background: #f0ede9; border-color: var(--kindle-gray); }
+.ux-btn:active { background: #e8e4e0; transform: scale(0.97); }
 
 .kindle-scroll-canvas {
   flex: 1;

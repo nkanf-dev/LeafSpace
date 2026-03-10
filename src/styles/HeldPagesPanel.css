@@ -35,6 +35,8 @@
   opacity: 0.5;
 }
 
+.view-toggle button:hover:not(.active) { opacity: 0.75; background: rgba(0,0,0,0.05); }
+
 .view-toggle button.active {
   background: #fff;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
@@ -110,14 +112,15 @@
 .del-btn-ux {
   background: none;
   border: none;
-  color: #eee;
+  color: var(--kindle-subtle);
   font-size: 1.1rem;
   cursor: pointer;
   padding: 0 4px;
+  transition: color 0.2s;
 }
 
-.held-item-ux:hover .del-btn-ux { color: #ccc; }
-.del-btn-ux:hover { color: #ef4444 !important; }
+.held-item-ux:hover .del-btn-ux { color: var(--kindle-gray); }
+.del-btn-ux:hover { color: var(--kindle-danger) !important; }
 
 .card-title-ux { font-size: 0.85rem; font-weight: 600; color: var(--kindle-ink); }
 .card-note-ux { font-size: 0.7rem; color: var(--kindle-gray); font-style: italic; }
