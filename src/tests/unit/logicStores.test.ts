@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DexieWorkspacePersistencePort, PersistenceService } from '../../services/PersistenceService';
+import { thumbnailService } from '../../services/ThumbnailService';
 import { heldStore } from '../../stores/heldStore';
 import { useBookStore } from '../../stores/bookStore';
 import { thumbnailStore } from '../../stores/thumbnailStore';
@@ -55,6 +56,41 @@ describe('logic store integration', () => {
     heldStore.getState().markHeldPageClosed(5, 'secondary');
     expect(heldStore.getState().pages[0].isOpen).toBe(false);
     expect(heldStore.getState().pages[0].linkedWindowIds).toEqual([]);
+  });
+
+  it('deduplicates concurrent holdPage calls for the same page', async () => {
+    const ensureThumbnailMock = vi.mocked(thumbnailService.ensureThumbnail);
+    let releaseHold!: () => void;
+    ensureThumbnailMock.mockImplementationOnce(
+      () => new Promise<void>((resolve) => {
+        releaseHold = resolve;
+      }),
+    );
+
+    const firstHold = heldStore.getState().holdPage(12);
+    const secondHold = heldStore.getState().holdPage(12);
+    releaseHold();
+
+    await Promise.all([firstHold, secondHold]);
+
+    expect(heldStore.getState().pages.map((page) => page.pageNumber)).toEqual([12]);
+  });
+
+  it('shows held page immediately before thumbnail warmup finishes', async () => {
+    const ensureThumbnailMock = vi.mocked(thumbnailService.ensureThumbnail);
+    let releaseHold!: () => void;
+    ensureThumbnailMock.mockImplementationOnce(
+      () => new Promise<void>((resolve) => {
+        releaseHold = resolve;
+      }),
+    );
+
+    const holdPromise = heldStore.getState().holdPage(18);
+
+    expect(heldStore.getState().pages.map((page) => page.pageNumber)).toEqual([18]);
+
+    releaseHold();
+    await holdPromise;
   });
 
   it('keeps bookStore currentPage in sync with main window operations', () => {

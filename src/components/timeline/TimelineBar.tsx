@@ -48,9 +48,9 @@ export const TimelineBar: React.FC<Props> = ({
       <div className="flex h-10 flex-1 items-center">
         <div className="group relative flex h-5 w-full cursor-pointer items-center" onClick={handleTrackClick}>
           <div className="absolute inset-x-0 h-[2px] bg-[var(--border)]" />
-          <div className="absolute left-0 h-[2px] bg-stone-900 transition-[width] duration-200" style={{ width: `${progress}%` }} />
+          <div className="absolute left-0 h-[2px] bg-stone-900" style={{ width: `${progress}%` }} />
           {markerElements}
-          <div className="absolute top-1/2 z-20 h-3 w-3 -translate-x-1/2 -translate-y-1/2 border-2 border-stone-900 bg-[var(--surface)] transition-[left] duration-200" style={{ left: `${progress}%` }}>
+          <div className="absolute top-1/2 z-20 h-3 w-3 -translate-x-1/2 -translate-y-1/2 border-2 border-stone-900 bg-[var(--surface)]" style={{ left: `${progress}%` }}>
             <div className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 bg-stone-900 px-1.5 py-0.5 text-[0.65rem] font-bold text-white opacity-0 transition group-hover:opacity-100">
               {progress.toFixed(0)}%
             </div>

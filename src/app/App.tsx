@@ -27,18 +27,23 @@ function App() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
+  const isHydratingDocumentRef = useRef(false);
 
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      isHydratingDocumentRef.current = true;
       try {
         await loadDocument(file);
-        await registerCurrentBook(file);
         const newId = useBookStore.getState().documentId;
-        if (newId) await restoreWorkspace(newId);
+        if (newId) {
+          await restoreWorkspace(newId);
+        }
+        await registerCurrentBook(file);
       } catch (err) {
         console.error('Workflow Error:', err);
       } finally {
+        isHydratingDocumentRef.current = false;
         e.target.value = '';
       }
     }
@@ -49,7 +54,7 @@ function App() {
   }, [hydrateRecentBooks]);
 
   useEffect(() => {
-    if (!documentId || workspaceStatus !== 'idle') {
+    if (!documentId || workspaceStatus !== 'idle' || isHydratingDocumentRef.current) {
       return;
     }
 
@@ -85,6 +90,7 @@ function App() {
         e.preventDefault();
         closeQuickFlip();
       }
+      // Note: Do NOT preventDefault for other keys to allow normal event propagation
     };
 
     window.addEventListener('keydown', handleKeyDown);

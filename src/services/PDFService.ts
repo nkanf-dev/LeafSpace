@@ -2,6 +2,10 @@ import * as pdfjsLib from 'pdfjs-dist';
 
 export type PDFDocumentSource = File | Blob | string;
 
+function cloneBytes(bytes: Uint8Array): Uint8Array {
+  return Uint8Array.from(bytes);
+}
+
 export class PDFService {
   static readonly shared = new PDFService();
   private fingerprint: string | null = null;
@@ -23,9 +27,11 @@ export class PDFService {
   }
 
   async loadDocument(source: PDFDocumentSource): Promise<{ numPages: number }> {
-    const bytes = await this.resolveSource(source);
+    const sourceBytes = await this.resolveSource(source);
+    const pdfjsBytes = cloneBytes(sourceBytes);
+    const cacheBytes = cloneBytes(sourceBytes);
     const loadingTask = pdfjsLib.getDocument({ 
-      data: bytes,
+      data: pdfjsBytes,
       useWorkerFetch: false,
       isEvalSupported: false
     });
@@ -34,7 +40,7 @@ export class PDFService {
       const doc = await loadingTask.promise;
       this.fingerprint = doc.fingerprints[0] || `doc_${Date.now()}`;
       this.numPages = doc.numPages;
-      this.documentData = bytes;
+      this.documentData = cacheBytes;
       this.hasDoc = true;
       await doc.destroy();
       return { numPages: this.numPages };

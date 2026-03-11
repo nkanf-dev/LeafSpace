@@ -18,6 +18,7 @@ export interface HeldStoreState {
 const initialState = {
   pages: [] as HeldPage[],
 };
+const pendingHoldPages = new Set<number>();
 
 function createDefaultName(pageNumber: number): string {
   return `Page ${pageNumber}`;
@@ -30,34 +31,44 @@ function sanitizeLinkedWindowIds(linkedWindowIds: string[]): string[] {
 export const useHeldStore = create<HeldStoreState>((set) => ({
   ...initialState,
   holdPage: async (pageNumber) => {
+    if (pendingHoldPages.has(pageNumber)) {
+      return;
+    }
+
     const existingPage = useHeldStore.getState().pages.find((page) => page.pageNumber === pageNumber);
 
     if (existingPage) {
       return;
     }
 
+    pendingHoldPages.add(pageNumber);
+
     const thumbnailKey = thumbnailService.getThumbnailKey(pageNumber);
+
+    set((state) => ({
+      pages: state.pages.some((page) => page.pageNumber === pageNumber)
+        ? state.pages
+        : [
+            ...state.pages,
+            {
+              createdAt: new Date().toISOString(),
+              defaultName: createDefaultName(pageNumber),
+              id: uuidv4(),
+              isOpen: false,
+              linkedWindowIds: [],
+              pageNumber,
+              thumbnailKey,
+            },
+          ],
+    }));
 
     try {
       await thumbnailService.ensureThumbnail(pageNumber);
     } catch {
       // Thumbnail warmup is best effort only.
+    } finally {
+      pendingHoldPages.delete(pageNumber);
     }
-
-    set((state) => ({
-      pages: [
-        ...state.pages,
-        {
-          createdAt: new Date().toISOString(),
-          defaultName: createDefaultName(pageNumber),
-          id: uuidv4(),
-          isOpen: false,
-          linkedWindowIds: [],
-          pageNumber,
-          thumbnailKey,
-        },
-      ],
-    }));
   },
   markHeldPageClosed: (pageNumber, windowId) => {
     set((state) => ({
@@ -109,24 +120,28 @@ export const useHeldStore = create<HeldStoreState>((set) => ({
     });
   },
   reset: () => {
+    pendingHoldPages.clear();
     set(() => ({
       ...initialState,
     }));
   },
   restorePages: (pages) => {
     set(() => ({
-      pages: pages.map((page) => {
-        const linkedWindowIds = sanitizeLinkedWindowIds(page.linkedWindowIds ?? []);
+      pages: Array.from(new Map(
+        pages.map((page) => {
+          const linkedWindowIds = sanitizeLinkedWindowIds(page.linkedWindowIds ?? []);
 
-        return {
-          ...page,
-          isOpen: linkedWindowIds.length > 0,
-          linkedWindowIds,
-        };
-      }),
+          return [page.pageNumber, {
+            ...page,
+            isOpen: linkedWindowIds.length > 0,
+            linkedWindowIds,
+          }];
+        }),
+      ).values()),
     }));
   },
   unholdPage: (pageNumber) => {
+    pendingHoldPages.delete(pageNumber);
     set((state) => ({
       pages: state.pages.filter((page) => page.pageNumber !== pageNumber),
     }));

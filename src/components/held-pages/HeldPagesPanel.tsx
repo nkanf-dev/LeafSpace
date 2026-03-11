@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { Document, Thumbnail } from 'react-pdf';
 import type { HeldPage } from '../../types/domain';
-import { useBookStore } from '../../stores/bookStore';
 import { LayoutGrid, List, X } from 'lucide-react';
+import { CachedThumbnail } from '../thumbnails/CachedThumbnail';
 
 interface Props {
   pages: HeldPage[];
@@ -11,10 +10,9 @@ interface Props {
 }
 
 export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onRemovePage }) => {
-  const documentUrl = useBookStore((state) => state.documentUrl);
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
 
-  const renderPageItem = (page: HeldPage, canRenderThumbnail: boolean) => {
+  const renderPageItem = (page: HeldPage) => {
     const isCard = viewMode === 'card';
 
     return (
@@ -27,11 +25,14 @@ export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onRemovePa
       >
         {isCard && (
           <div className="flex w-[60px] min-h-[80px] shrink-0 items-center justify-center bg-[#f0ede9]">
-            {canRenderThumbnail ? (
-              <Thumbnail pageNumber={page.pageNumber} width={70} loading={<div className="text-xs font-bold text-stone-300">{page.pageNumber}</div>} />
-            ) : (
-              <div className="text-xs font-bold text-stone-300">{page.pageNumber}</div>
-            )}
+            <CachedThumbnail
+              alt={`第 ${page.pageNumber} 页缩略图`}
+              height={80}
+              pageNumber={page.pageNumber}
+              placeholder={<div className="text-xs font-bold text-stone-300">{page.pageNumber}</div>}
+              priority={true}
+              width={60}
+            />
           </div>
         )}
 
@@ -86,10 +87,8 @@ export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onRemovePa
       <div className="min-h-0 flex-1 overflow-y-auto">
         {pages.length === 0 ? (
           <div className="pt-24 text-center text-stone-500">✧ 卷轴空空如也</div>
-        ) : documentUrl ? (
-          <Document file={documentUrl}>{pages.map((page) => renderPageItem(page, true))}</Document>
         ) : (
-          pages.map((page) => renderPageItem(page, false))
+          pages.map((page) => renderPageItem(page))
         )}
       </div>
     </div>

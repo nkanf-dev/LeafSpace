@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { QuickFlipOverlay } from '../../components/quick-flip/QuickFlipOverlay';
 
 describe('QuickFlipOverlay', () => {
@@ -13,9 +13,14 @@ describe('QuickFlipOverlay', () => {
     onPageChange: vi.fn(),
   };
 
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('renders when visible', () => {
     render(<QuickFlipOverlay {...defaultProps} />);
-    expect(screen.getByText('Page 10 / 100')).toBeInTheDocument();
+    expect(screen.getByText('速翻视图')).toBeInTheDocument();
+    expect(screen.getByText('长按进入时间轴')).toBeInTheDocument();
   });
 
   it('calls onClose when Escape is pressed', () => {
@@ -24,15 +29,19 @@ describe('QuickFlipOverlay', () => {
     expect(defaultProps.onClose).toHaveBeenCalled();
   });
 
-  it('calls onPageChange with next page when ArrowRight is pressed', () => {
+  it('moves selection with ArrowRight and commits on Enter', () => {
     render(<QuickFlipOverlay {...defaultProps} />);
     fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect(defaultProps.onPageChange).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: 'Enter' });
     expect(defaultProps.onPageChange).toHaveBeenCalledWith(11);
   });
 
-  it('calls onPageChange with previous page when ArrowLeft is pressed', () => {
+  it('moves selection with ArrowLeft and commits on Enter', () => {
     render(<QuickFlipOverlay {...defaultProps} />);
     fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    expect(defaultProps.onPageChange).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: 'Enter' });
     expect(defaultProps.onPageChange).toHaveBeenCalledWith(9);
   });
 

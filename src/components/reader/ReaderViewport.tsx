@@ -360,10 +360,12 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   }, [setActiveWindow, windowId]);
 
   const handleViewportKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Ignore if any modifier keys are pressed (except shift for screenshot)
     if (e.altKey || e.metaKey || e.ctrlKey) {
       return;
     }
 
+    // Only handle arrow keys and Enter, let other keys propagate normally
     if (e.key === 'ArrowLeft') {
       e.preventDefault();
       updateActivePage(activePage - 1);
@@ -379,7 +381,10 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     if (e.key === 'ArrowUp') {
       e.preventDefault();
       void holdPage(activePage);
+      return;
     }
+
+    // Don't preventDefault for other keys to allow normal mouse operations
   }, [activePage, holdPage, updateActivePage]);
 
   return (

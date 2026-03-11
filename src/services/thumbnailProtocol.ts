@@ -1,10 +1,27 @@
+export interface ThumbnailLoadDocumentRequest {
+  type: 'load-document';
+  documentId: string;
+  source: ArrayBuffer;
+}
+
 export interface ThumbnailRenderRequest {
   type: 'render';
   id: string;
   key: string;
+  documentId: string;
   pageNumber: number;
   maxWidth: number;
-  source: ArrayBuffer;
+}
+
+export interface ThumbnailDocumentReady {
+  type: 'document-ready';
+  documentId: string;
+}
+
+export interface ThumbnailDocumentError {
+  type: 'document-error';
+  documentId: string;
+  error: string;
 }
 
 export interface ThumbnailRenderSuccess {
@@ -25,5 +42,5 @@ export interface ThumbnailRenderError {
   error: string;
 }
 
-export type ThumbnailWorkerRequest = ThumbnailRenderRequest;
-export type ThumbnailWorkerResponse = ThumbnailRenderSuccess | ThumbnailRenderError;
+export type ThumbnailWorkerRequest = ThumbnailLoadDocumentRequest | ThumbnailRenderRequest;
+export type ThumbnailWorkerResponse = ThumbnailDocumentReady | ThumbnailDocumentError | ThumbnailRenderSuccess | ThumbnailRenderError;

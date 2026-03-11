@@ -102,7 +102,10 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
           y: nextY,
         });
       }
-    } else if (resizingId) {
+      return; // Important: ensure drag continues regardless of keyboard state
+    }
+
+    if (resizingId) {
       const win = windowsRef.current.find(w => w.id === resizingId);
       if (win) {
         const deltaX = e.clientX - resizeStart.current.x;

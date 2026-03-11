@@ -7,6 +7,8 @@ interface PersistedBookRecord extends RecentBookEntry {
 }
 
 interface WorkspacePersistencePort {
+  deleteBook(documentId: string): Promise<void>;
+  deleteWorkspace(documentId: string): Promise<void>;
   deleteDatabase(): Promise<void>;
   getBook(documentId: string): Promise<PersistedBookRecord | undefined>;
   getRecentBooks(limit?: number): Promise<RecentBookEntry[]>;
@@ -32,6 +34,14 @@ export class DexieWorkspacePersistencePort extends Dexie implements WorkspacePer
   async deleteDatabase(): Promise<void> {
     this.close();
     await Dexie.delete(this.name);
+  }
+
+  deleteBook(documentId: string): Promise<void> {
+    return this.books.delete(documentId);
+  }
+
+  deleteWorkspace(documentId: string): Promise<void> {
+    return this.workspaces.delete(documentId);
   }
 
   getBook(documentId: string): Promise<PersistedBookRecord | undefined> {
@@ -63,6 +73,7 @@ export class DexieWorkspacePersistencePort extends Dexie implements WorkspacePer
 
 export class PersistenceService {
   private readonly port: WorkspacePersistencePort;
+  private static readonly MAX_RECENT_BOOKS = 3;
 
   constructor(port: WorkspacePersistencePort = new DexieWorkspacePersistencePort()) {
     this.port = port;
@@ -75,6 +86,7 @@ export class PersistenceService {
   async saveWorkspace(snapshot: WorkspaceSnapshot): Promise<void> {
     await this.port.putWorkspace(snapshot);
     await this.port.updateBook(snapshot.documentId, { lastSavedAt: snapshot.savedAt, lastOpenedAt: new Date().toISOString() });
+    await this.trimRecentBooks();
   }
 
   async saveBookAsset(input: {
@@ -96,6 +108,7 @@ export class PersistenceService {
       lastSavedAt: existing?.lastSavedAt,
       blob: input.file,
     });
+    await this.trimRecentBooks();
   }
 
   async loadBookAsset(documentId: string): Promise<File | null> {
@@ -106,6 +119,7 @@ export class PersistenceService {
     }
 
     await this.port.updateBook(documentId, { lastOpenedAt: new Date().toISOString() });
+    await this.trimRecentBooks();
 
     return new File([record.blob], record.fileName, {
       type: record.blob.type || 'application/pdf',
@@ -113,12 +127,25 @@ export class PersistenceService {
     });
   }
 
-  async listRecentBooks(limit = 8): Promise<RecentBookEntry[]> {
+  async listRecentBooks(limit = PersistenceService.MAX_RECENT_BOOKS): Promise<RecentBookEntry[]> {
     return this.port.getRecentBooks(limit);
   }
 
   async touchBook(documentId: string): Promise<void> {
     await this.port.updateBook(documentId, { lastOpenedAt: new Date().toISOString() });
+    await this.trimRecentBooks();
+  }
+
+  private async trimRecentBooks(limit = PersistenceService.MAX_RECENT_BOOKS): Promise<void> {
+    const recentBooks = await this.port.getRecentBooks(Number.MAX_SAFE_INTEGER);
+    const overflowBooks = recentBooks.slice(limit);
+
+    await Promise.all(
+      overflowBooks.map(async (book) => {
+        await this.port.deleteBook(book.documentId);
+        await this.port.deleteWorkspace(book.documentId);
+      }),
+    );
   }
 }
 

@@ -89,4 +89,37 @@ describe('PDFService', () => {
     expect(service.getDocumentFingerprint()).toBe('fingerprint-1');
     expect(Array.from(service.getDocumentData() ?? [])).toEqual(Array.from(bytes));
   });
+
+  it('preserves thumbnail source bytes even if pdfjs detaches its input buffer', async () => {
+    const bytes = Uint8Array.from([1, 2, 3, 4, 5, 6]);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        arrayBuffer: vi.fn().mockResolvedValue(bytes.buffer.slice(0)),
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+      }),
+    );
+
+    getDocumentMock.mockImplementation(({ data }: { data: Uint8Array }) => {
+      structuredClone(data.buffer, { transfer: [data.buffer] });
+
+      return {
+        destroy: destroyLoadingTaskMock,
+        promise: Promise.resolve({
+          destroy: vi.fn().mockResolvedValue(undefined),
+          fingerprints: ['fingerprint-detached'],
+          getPage: vi.fn(),
+          numPages: 6,
+        }),
+      };
+    });
+
+    const service = new PDFService();
+    await service.loadDocument('https://example.com/detached.pdf');
+
+    expect(Array.from(service.getDocumentData() ?? [])).toEqual([1, 2, 3, 4, 5, 6]);
+  });
 });

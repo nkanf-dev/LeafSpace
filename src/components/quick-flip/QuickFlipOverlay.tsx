@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Document, Thumbnail } from 'react-pdf';
 import { Pin } from 'lucide-react';
 
 import { useBookStore } from '../../stores/bookStore';
 import { useHeldStore } from '../../stores/heldStore';
 import { useWindowStore } from '../../stores/windowStore';
+import { thumbnailService } from '../../services/ThumbnailService';
+import { CachedThumbnail } from '../thumbnails/CachedThumbnail';
 
 interface Props {
   isVisible: boolean;
@@ -20,6 +21,13 @@ const ACCELERATION_IDLE_MS = 180;
 const THUMBNAIL_HOLD_INTERVAL_MS = 115;
 const TIMELINE_HOLD_INTERVAL_MS = 42;
 const MAX_TIMELINE_STEP = 8;
+const THUMBNAIL_LOAD_RADIUS = 10;
+const VIRTUAL_RENDER_RADIUS = 14;
+const SLOT_WIDTH = 240;
+const SLOT_HEIGHT = 360;
+const FRAME_WIDTH = 176;
+const FRAME_HEIGHT = 252;
+const STRIP_SMOOTH_DURATION_MS = 220;
 
 type ViewMode = 'thumbnails' | 'timeline';
 
@@ -41,12 +49,15 @@ function buildSectionMarkers(totalPages: number): number[] {
 
 export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentPage, totalPages, onPageChange }) => {
   const [selectedPage, setSelectedPage] = useState(currentPage);
+  const [scrollAnchorPage, setScrollAnchorPage] = useState(currentPage);
   const [zoom, setZoom] = useState(1.0);
   const [viewMode, setViewMode] = useState<ViewMode>('thumbnails');
   const [pressedDirection, setPressedDirection] = useState<-1 | 1 | null>(null);
   const stripRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const latestSelectedPageRef = useRef(currentPage);
   const alignFrameRef = useRef<number | null>(null);
+  const scrollAnimationFrameRef = useRef<number | null>(null);
   const skipNextThumbnailScrollAnimationRef = useRef(false);
   const holdStartTimeRef = useRef<number | null>(null);
   const exitTimelineTimerRef = useRef<number | null>(null);
@@ -60,6 +71,25 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
   );
   const sectionMarkers = useMemo(() => buildSectionMarkers(totalPages), [totalPages]);
   const file = useMemo(() => documentUrl ?? null, [documentUrl]);
+  const scaledSlotWidth = SLOT_WIDTH * zoom;
+  const scaledSlotHeight = SLOT_HEIGHT * zoom;
+  const scaledFrameWidth = FRAME_WIDTH * zoom;
+  const scaledFrameHeight = FRAME_HEIGHT * zoom;
+  const renderedRange = useMemo(() => {
+    const anchorStart = Math.min(selectedPage, scrollAnchorPage);
+    const anchorEnd = Math.max(selectedPage, scrollAnchorPage);
+
+    return {
+      start: clampPage(anchorStart - VIRTUAL_RENDER_RADIUS, totalPages),
+      end: clampPage(anchorEnd + VIRTUAL_RENDER_RADIUS, totalPages),
+    };
+  }, [scrollAnchorPage, selectedPage, totalPages]);
+  const renderedPages = useMemo(
+    () => Array.from({ length: renderedRange.end - renderedRange.start + 1 }, (_, index) => renderedRange.start + index),
+    [renderedRange.end, renderedRange.start],
+  );
+  const leadingSpacerWidth = Math.max(0, (renderedRange.start - 1) * scaledSlotWidth);
+  const trailingSpacerWidth = Math.max(0, (totalPages - renderedRange.end) * scaledSlotWidth);
 
   const clearExitTimelineTimer = useCallback(() => {
     if (exitTimelineTimerRef.current !== null) {
@@ -68,13 +98,54 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     }
   }, []);
 
+  const cancelStripAnimation = useCallback(() => {
+    if (scrollAnimationFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollAnimationFrameRef.current);
+      scrollAnimationFrameRef.current = null;
+    }
+  }, []);
+
+  const animateStripScroll = useCallback((targetLeft: number) => {
+    const strip = stripRef.current;
+    if (!strip) {
+      return;
+    }
+
+    cancelStripAnimation();
+
+    const startLeft = strip.scrollLeft;
+    const delta = targetLeft - startLeft;
+    if (Math.abs(delta) < 0.5) {
+      strip.scrollLeft = targetLeft;
+      return;
+    }
+
+    const startedAt = performance.now();
+    const step = (timestamp: number) => {
+      const elapsed = timestamp - startedAt;
+      const progress = Math.min(1, elapsed / STRIP_SMOOTH_DURATION_MS);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      strip.scrollLeft = startLeft + delta * eased;
+
+      if (progress < 1) {
+        scrollAnimationFrameRef.current = window.requestAnimationFrame(step);
+      } else {
+        scrollAnimationFrameRef.current = null;
+      }
+    };
+
+    scrollAnimationFrameRef.current = window.requestAnimationFrame(step);
+  }, [cancelStripAnimation]);
+
   const alignStripToPage = useCallback((page: number, behavior: ScrollBehavior, attempt = 0) => {
     if (!isVisible) return;
 
     const strip = stripRef.current;
     if (!strip) return;
 
-    const activeEl = strip.querySelector(`.p-${page}`) as HTMLElement | null;
+    // Clamp page to ensure it's within valid range
+    const clampedPage = clampPage(page, totalPages);
+    const activeEl = strip.querySelector(`.p-${clampedPage}`) as HTMLElement | null;
     if (!activeEl) {
       if (attempt >= MAX_ALIGNMENT_ATTEMPTS) return;
 
@@ -83,14 +154,24 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
       }
 
       alignFrameRef.current = window.requestAnimationFrame(() => {
-        alignStripToPage(page, behavior, attempt + 1);
+        alignStripToPage(clampedPage, behavior, attempt + 1);
       });
       return;
     }
 
-    const targetLeft = activeEl.offsetLeft - strip.clientWidth / 2 + activeEl.clientWidth / 2;
-    strip.scrollTo({ left: Math.max(0, targetLeft), behavior });
-  }, [isVisible]);
+    const stripRect = strip.getBoundingClientRect();
+    const activeRect = activeEl.getBoundingClientRect();
+    const targetLeft = strip.scrollLeft + (activeRect.left - stripRect.left) - (strip.clientWidth / 2 - activeEl.clientWidth / 2);
+    const nextLeft = Math.max(0, targetLeft);
+
+    if (behavior === 'smooth') {
+      animateStripScroll(nextLeft);
+      return;
+    }
+
+    cancelStripAnimation();
+    strip.scrollLeft = nextLeft;
+  }, [animateStripScroll, cancelStripAnimation, isVisible, totalPages]);
 
   const updateSelectedPage = useCallback((updater: (page: number) => number) => {
     setSelectedPage((page) => {
@@ -124,20 +205,24 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     }, ACCELERATION_IDLE_MS);
   }, [alignStripToPage, clearExitTimelineTimer]);
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-
+  const handleWheelInput = useCallback((deltaY: number) => {
     if (viewMode === 'timeline') {
-      const direction = e.deltaY >= 0 ? 1 : -1;
+      const direction = deltaY >= 0 ? 1 : -1;
       stepSelection(direction as -1 | 1, getAcceleratedStep());
       return;
     }
 
     setZoom((value) => {
-      const factor = e.deltaY > 0 ? 0.92 : 1.08;
+      const factor = deltaY > 0 ? 0.92 : 1.08;
       return Math.min(2.2, Math.max(0.55, Number((value * factor).toFixed(3))));
     });
   }, [getAcceleratedStep, stepSelection, viewMode]);
+
+  const handleWheelCapture = useCallback((event: React.WheelEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    handleWheelInput(event.deltaY);
+  }, [handleWheelInput]);
 
   useEffect(() => {
     latestSelectedPageRef.current = selectedPage;
@@ -149,6 +234,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
       setPressedDirection(null);
       holdStartTimeRef.current = null;
       clearExitTimelineTimer();
+      cancelStripAnimation();
       if (alignFrameRef.current !== null) {
         window.cancelAnimationFrame(alignFrameRef.current);
         alignFrameRef.current = null;
@@ -159,6 +245,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     setViewMode('thumbnails');
     setPressedDirection(null);
     setSelectedPage(currentPage);
+    setScrollAnchorPage(currentPage);
     latestSelectedPageRef.current = currentPage;
     holdStartTimeRef.current = null;
     clearExitTimelineTimer();
@@ -168,7 +255,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     }, 40);
 
     return () => window.clearTimeout(openTimer);
-  }, [clearExitTimelineTimer, currentPage, isVisible]);
+  }, [cancelStripAnimation, clearExitTimelineTimer, currentPage, isVisible]);
 
   useEffect(() => {
     if (!isVisible || pressedDirection === null) {
@@ -228,20 +315,12 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
       }
 
       if (e.key === 'ArrowUp') {
-        if (viewMode !== 'thumbnails') {
-          return;
-        }
-
         e.preventDefault();
-        holdPage(selectedPage);
+        void holdPage(selectedPage);
         return;
       }
 
       if (e.key === 'ArrowDown') {
-        if (viewMode !== 'thumbnails') {
-          return;
-        }
-
         e.preventDefault();
         unholdPage(selectedPage);
         return;
@@ -281,21 +360,89 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     const behavior = skipNextThumbnailScrollAnimationRef.current ? 'auto' : 'smooth';
     skipNextThumbnailScrollAnimationRef.current = false;
     alignStripToPage(selectedPage, behavior);
-  }, [alignStripToPage, isVisible, selectedPage, viewMode]);
+  }, [alignStripToPage, isVisible, pressedDirection, selectedPage, viewMode]);
+
+  useEffect(() => {
+    if (!isVisible || viewMode !== 'thumbnails') {
+      return;
+    }
+
+    alignStripToPage(selectedPage, 'auto');
+  }, [alignStripToPage, isVisible, selectedPage, viewMode, zoom]);
+
+  useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
+
+    const overlay = overlayRef.current;
+    if (!overlay) {
+      return;
+    }
+
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      handleWheelInput(event.deltaY);
+    };
+
+    overlay.addEventListener('wheel', handleWheel, { passive: false });
+
+    return () => overlay.removeEventListener('wheel', handleWheel);
+  }, [handleWheelInput, isVisible]);
+
+  useEffect(() => {
+    if (!isVisible || viewMode !== 'thumbnails' || !file) {
+      return;
+    }
+
+    const pages = Array.from(
+      new Set(
+        Array.from({ length: THUMBNAIL_LOAD_RADIUS * 2 + 1 }, (_, index) => selectedPage - THUMBNAIL_LOAD_RADIUS + index)
+          .concat(renderedPages)
+          .filter((page) => page >= 1 && page <= totalPages),
+      ),
+    );
+
+    void thumbnailService.ensureThumbnails(pages, scaledFrameWidth).catch(() => undefined);
+  }, [file, isVisible, renderedPages, scaledFrameWidth, selectedPage, totalPages, viewMode]);
+
+  useEffect(() => {
+    if (!isVisible || viewMode !== 'thumbnails') {
+      return;
+    }
+
+    const strip = stripRef.current;
+    if (!strip) {
+      return;
+    }
+
+    const handleScroll = () => {
+      const centerOffset = strip.scrollLeft + strip.clientWidth / 2;
+      const page = clampPage(Math.round(centerOffset / Math.max(1, scaledSlotWidth)) + 1, totalPages);
+      setScrollAnchorPage((current) => (current === page ? current : page));
+    };
+
+    handleScroll();
+    strip.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => strip.removeEventListener('scroll', handleScroll);
+  }, [isVisible, scaledSlotWidth, totalPages, viewMode]);
 
   useEffect(() => () => {
     clearExitTimelineTimer();
+    cancelStripAnimation();
     if (alignFrameRef.current !== null) {
       window.cancelAnimationFrame(alignFrameRef.current);
     }
-  }, [clearExitTimelineTimer]);
+  }, [cancelStripAnimation, clearExitTimelineTimer]);
 
   if (!isVisible) return null;
 
   const selectedProgress = ((selectedPage - 1) / Math.max(1, totalPages - 1)) * 100;
 
   return (
-    <div className="fixed inset-0 z-[3000] overflow-y-auto overflow-x-hidden" onWheel={handleWheel}>
+    <div ref={overlayRef} className="fixed inset-0 z-[3000] overflow-hidden" onWheelCapture={handleWheelCapture}>
       <div className="absolute inset-0 bg-[rgba(251,250,248,0.7)] backdrop-blur-[40px]" onClick={onClose} />
       <div className="relative z-10 flex min-h-screen w-full flex-col px-6 py-6">
         <div className="mb-5 shrink-0 text-center">
@@ -318,43 +465,68 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
 
         <div className="relative flex min-h-0 flex-1 items-center">
           {viewMode === 'thumbnails' && (
-            <div className="quick-flip-strip h-full w-full overflow-x-auto overflow-y-visible" ref={stripRef}>
+            <div
+              className="quick-flip-strip h-full w-full overflow-x-auto overflow-y-visible"
+              ref={stripRef}
+              onWheelCapture={handleWheelCapture}
+              style={{ overscrollBehavior: 'contain' }}
+            >
               {file && (
-                <Document file={file}>
-                  {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => {
-                    const isSelected = page === selectedPage;
-                    const isHeld = heldPageNumbers.includes(page);
+                <div className="flex h-full items-center">
+                  <div aria-hidden="true" style={{ width: leadingSpacerWidth, minWidth: leadingSpacerWidth }} />
+                  {renderedPages.map((page) => {
+                const isSelected = page === selectedPage;
+                const isHeld = heldPageNumbers.includes(page);
+                const isPriority = Math.abs(page - selectedPage) <= THUMBNAIL_LOAD_RADIUS;
 
-                    return (
-                      <div
-                        key={page}
-                        className={`p-${page} flex shrink-0 cursor-pointer flex-col items-center gap-6 transition-all duration-300 ${isSelected ? 'opacity-100' : 'opacity-35 hover:opacity-60'}`}
-                        style={{ transform: `scale(${isSelected ? 1.3 * zoom : 0.85 * zoom})` }}
-                        onClick={(e) => {
-                          if (e.shiftKey) {
-                            openInNewWindow(page);
-                            return;
-                          }
-                          setSelectedPage(page);
-                          latestSelectedPageRef.current = page;
-                        }}
-                        onDoubleClick={() => { onPageChange(page); onClose(); }}
-                      >
-                        <div className={`relative flex h-[280px] w-[200px] items-center justify-center overflow-hidden border bg-white ${isSelected ? 'translate-y-[-15px] border-[3px] border-stone-900' : isHeld ? 'border-[#f5a623]' : 'border-[var(--border)]'}`}>
-                          <Thumbnail pageNumber={page} width={180 * zoom} loading={<div className="text-xl font-bold text-stone-300">{page}</div>} />
-                          {isHeld && (
-                            <div className="absolute right-3 top-3 text-[#f5a623] [filter:drop-shadow(0_2px_4px_rgba(0,0,0,0.2))]">
-                              <Pin size={24} fill="currentColor" />
-                            </div>
-                          )}
+                return (
+                  <button
+                    key={page}
+                    type="button"
+                    data-page={page}
+                    className={`p-${page} flex shrink-0 cursor-pointer flex-col items-center justify-center gap-6 border-0 bg-transparent px-2 transition-opacity duration-200 ${isSelected ? 'opacity-100' : 'opacity-35 hover:opacity-60'}`}
+                    style={{ width: scaledSlotWidth, minWidth: scaledSlotWidth, height: scaledSlotHeight }}
+                    onClick={(e) => {
+                      if (e.shiftKey) {
+                        openInNewWindow(page);
+                        return;
+                      }
+                      setSelectedPage(page);
+                      latestSelectedPageRef.current = page;
+                    }}
+                    onDoubleClick={() => { onPageChange(page); onClose(); }}
+                  >
+                    <div
+                      className={`relative flex items-center justify-center overflow-hidden border bg-white transition-transform duration-200 ${isSelected ? 'translate-y-[-15px] border-[3px] border-stone-900' : isHeld ? 'border-[#f5a623]' : 'border-[var(--border)]'}`}
+                      style={{
+                        height: scaledFrameHeight,
+                        transform: `scale(${isSelected ? 1.16 : 0.86})`,
+                        width: scaledFrameWidth,
+                      }}
+                    >
+                      <CachedThumbnail
+                        alt={`第 ${page} 页缩略图`}
+                        className="flex items-center justify-center bg-white"
+                        height={Math.round(scaledFrameHeight)}
+                        pageNumber={page}
+                        placeholder={<div className="text-xl font-bold text-stone-300">{page}</div>}
+                        priority={isPriority}
+                        width={Math.round(scaledFrameWidth)}
+                      />
+                      {isHeld && (
+                        <div className="absolute right-3 top-3 text-[#f5a623] [filter:drop-shadow(0_2px_4px_rgba(0,0,0,0.2))]">
+                          <Pin size={24} fill="currentColor" />
                         </div>
-                        <div className={`text-[1.1rem] font-bold text-stone-900 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0'}`} style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>
-                          {page}
-                        </div>
-                      </div>
-                    );
+                      )}
+                    </div>
+                    <div className={`text-[1.1rem] font-bold text-stone-900 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0'}`} style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>
+                      {page}
+                    </div>
+                  </button>
+                );
                   })}
-                </Document>
+                  <div aria-hidden="true" style={{ width: trailingSpacerWidth, minWidth: trailingSpacerWidth }} />
+                </div>
               )}
             </div>
           )}
@@ -378,7 +550,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
                   }}
                 >
                   <div className="absolute inset-x-0 top-1/2 h-[2px] -translate-y-1/2 bg-[var(--border)]" />
-                  <div className="absolute left-0 top-1/2 h-[2px] -translate-y-1/2 bg-stone-900 transition-[width] duration-100" style={{ width: `${selectedProgress}%` }} />
+                  <div className="absolute left-0 top-1/2 h-[2px] -translate-y-1/2 bg-stone-900" style={{ width: `${selectedProgress}%` }} />
 
                   {sectionMarkers.map((markerPage) => (
                     <div
