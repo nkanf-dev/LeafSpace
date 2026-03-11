@@ -5,74 +5,89 @@
 
 LeafSpace 是一款专为扫描版 PDF 打造的「纸感工作区」阅读器。它打破了传统 PDF 阅读器线性的翻页限制，引入了「阅览态-导航态-工作区」三态协同的交互模型，致力于为学术研读、深度学习和复杂文档处理提供极致的效率体验。
 
-## 🌟 核心理念
+## Overview
 
-- **纸感优先**：不追求炫技，而是通过 3D 翻页动画和自然的阴影模拟，建立书籍的位置感与厚度感。
-- **空间记忆**：利用速翻、夹页和窗口化布局，帮助用户在大脑中构建文档的「知识地图」。
-- **低切换成本**：通过手势与快捷键，在微调、跳转与对比之间无缝切换。
+LeafSpace 围绕三种状态组织交互：
 
-## 🛠️ 核心功能
+- **Reader**：用于连续阅读、缩放、翻页和保持纸面感。
+- **Quick Flip & Held Pages**：用于快速建立全书位置感，找到并“夹住”关键页面。
+- **Workspace**：用于把关“夹住”的页面展开到并行窗口中，对照、拆分和恢复现场。
 
-- 📖 **基础阅览 (M1)**：支持双页展开、平滑缩放与 3D 仿真翻页。
-- ⚡ **速翻模式 (Quick Flip, M2)**：Space 键激活，全局缩略图实时预览，建立文档全局观。
-- 📎 **夹页系统 (Page Holding, M3)**：临时保存感兴趣的页面，支持命名与快速回溯。
-- 🖥️ **工作区画布 (Workspace, M4)**：窗口化多页对照，支持贴边分屏与自定义布局。
-- ⏳ **时间轴导航 (Timeline, M2)**：直观展示文档骨架、目录、夹页与主窗口位置。
+专注于扫描书籍、档案材料等的类纸翻阅体验。
 
-## 🚀 技术架构
+## Screenshots
 
-- **Frontend**: React 19 + TypeScript + Vite
-- **State Management**: Zustand
-- **PDF Engine**: PDF.js (via react-pdf)
-- **Persistence**: IndexedDB (via Dexie.js)
-- **Icons**: Lucide React
-- **Worker**: Web Worker (用于异步缩略图生成)
+主阅读与工作区：
 
-## 🗺️ 项目路线图 (Roadmap)
+![LeafSpace main workspace](src/assets/leaf-main.webp)
 
-- [x] **Phase 1: Alpha 1 (基础阅览)**
-  - [x] 核心渲染引擎搭建
-  - [x] 仿真双页翻页实现
-  - [x] 缩放与基本缓存策略
-- [x] **Phase 2: Alpha 2 (导航系统)**
-  - [x] Quick Flip 速翻覆盖层
-  - [x] Timeline 时间轴组件
-  - [x] Web Worker 异步缩略图生成
-- [ ] **Phase 3: Beta 1 (夹页与持久化)** - *In Progress*
-  - [x] 夹页 UI 与 逻辑实现
-  - [ ] 基于 Dexie 的文档状态持久化
-  - [ ] 夹页命名与备注功能
-- [ ] **Phase 4: Beta 2 (工作区系统)** - *In Progress*
-  - [x] 窗口化画布基础
-  - [ ] 窗口拖拽、缩放与贴边分屏
-  - [ ] 布局快照保存与恢复
-- [ ] **Phase 5: Release Candidate (移动端与优化)**
-  - [ ] 底部 Sheet 交互适配
-  - [ ] 性能预算与首屏秒开优化
-  - [ ] 1.0 正式版发布
+速翻视图：
 
-## 💻 快速开始
+![LeafSpace quick flip](src/assets/leaf-quick.webp)
 
-### 开发环境
+## Features
+
+- **Paper-first reading**：保持接近纸面阅读的视觉节奏与布局感，不把界面做成以工具栏为中心的操作台。
+- **Quick Flip navigation**：通过缩略图条带与时间轴快速定位长文档中的目标页，减少线性翻页成本。
+- **Held pages**：将关键页面临时夹住，形成一条可回访的参考列表。
+- **Workspace canvas**：把页面打开为主视图、浮窗或分栏，用于平行阅读与内容比对。
+- **Session restore**：为单本书保存当前页、缩放、夹页和窗口布局，在下次打开时恢复现场。
+- **Thumbnail pipeline**：通过缓存、懒加载和 worker 渲染控制缩略图开销，保证大文档下的交互稳定性。
+
+## Interaction model
+
+当前版本中，几个核心操作可以串成一条连续路径：
+
+1. 在主视图中阅读并缩放页面。
+2. 按 `Space` 进入速翻视图，快速跳到目标区域。
+3. 用 `↑` 将关键页面夹住，必要时通过 `Shift + 点击` 或工作区打开为参考窗口。
+4. 返回主视图继续阅读，并在底部时间轴与右侧夹页列表中维持上下文。
+
+LeafSpace 的设计重点不是增加尽可能多的功能点，而是让这些动作之间的切换成本足够低。
+
+
+## Getting started
+
+目前已部署在 Cloudflare Pages，可以[在线体验](https://leafspace.kanglives.top)。
+
+如果想本地运行：
+
+### Requirements
+
+- Node.js 20+
+- npm 10+
+
+### Install
+
 ```bash
-# 安装依赖
 npm install
+```
 
-# 启动开发服务器
+### Run locally
+
+```bash
 npm run dev
 ```
 
-### 测试
+### Build
+
 ```bash
-# 运行单元测试
+npm run build
+```
+
+### Test
+
+```bash
 npm run test:unit
-
-# 运行 UI 测试
 npm run test:ui
-
-# 运行 E2E 测试
 npm run test:e2e
 ```
+
+## Repository guide
+
+- [src/components](src/components) contains the main UI surfaces, including reader, quick flip, timeline, held pages, and workspace canvas.
+- [src/services](src/services) contains PDF, persistence, and thumbnail pipeline logic.
+- [src/stores](src/stores) contains Zustand stores for document, window, thumbnail, quick flip, and workspace state.
 
 ---
 
