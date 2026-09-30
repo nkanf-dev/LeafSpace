@@ -90,10 +90,11 @@ export const useThumbnailStore = create<ThumbnailStoreState>((set, get) => ({
   markReady: ({ blobUrl, height, key, width }) => {
     set((state) => {
       const current = state.entries[key];
-
       if (!current) {
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
         return state;
       }
+      if (current.blobUrl && current.blobUrl !== blobUrl) URL.revokeObjectURL(current.blobUrl);
 
       const nextEntry: ThumbnailEntry = {
         ...current,
@@ -141,6 +142,7 @@ export const useThumbnailStore = create<ThumbnailStoreState>((set, get) => ({
   removeEntry: (key) => {
     set((state) => {
       const entries = { ...state.entries };
+      if (entries[key]?.blobUrl) URL.revokeObjectURL(entries[key].blobUrl!);
       delete entries[key];
 
       return {
@@ -150,6 +152,9 @@ export const useThumbnailStore = create<ThumbnailStoreState>((set, get) => ({
     });
   },
   reset: () => {
+    Object.values(get().entries).forEach((entry) => {
+      if (entry.blobUrl) URL.revokeObjectURL(entry.blobUrl);
+    });
     set(() => ({
       ...initialState,
     }));

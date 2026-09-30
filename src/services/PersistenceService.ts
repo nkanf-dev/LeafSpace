@@ -51,7 +51,9 @@ export class DexieWorkspacePersistencePort extends Dexie implements WorkspacePer
   async getRecentBooks(limit = 8): Promise<RecentBookEntry[]> {
     const books = await this.books.orderBy('lastOpenedAt').reverse().limit(limit).toArray();
 
-    return books.map(({ blob: _blob, ...rest }) => rest);
+    return books.map(({ documentId, fileName, fileSize, totalPages, lastOpenedAt, lastSavedAt }) => ({
+      documentId, fileName, fileSize, totalPages, lastOpenedAt, lastSavedAt,
+    }));
   }
 
   getWorkspace(documentId: string): Promise<WorkspaceSnapshot | undefined> {
@@ -86,7 +88,6 @@ export class PersistenceService {
   async saveWorkspace(snapshot: WorkspaceSnapshot): Promise<void> {
     await this.port.putWorkspace(snapshot);
     await this.port.updateBook(snapshot.documentId, { lastSavedAt: snapshot.savedAt, lastOpenedAt: new Date().toISOString() });
-    await this.trimRecentBooks();
   }
 
   async saveBookAsset(input: {
@@ -108,7 +109,6 @@ export class PersistenceService {
       lastSavedAt: existing?.lastSavedAt,
       blob: input.file,
     });
-    await this.trimRecentBooks();
   }
 
   async loadBookAsset(documentId: string): Promise<File | null> {
@@ -119,7 +119,6 @@ export class PersistenceService {
     }
 
     await this.port.updateBook(documentId, { lastOpenedAt: new Date().toISOString() });
-    await this.trimRecentBooks();
 
     return new File([record.blob], record.fileName, {
       type: record.blob.type || 'application/pdf',
@@ -133,20 +132,11 @@ export class PersistenceService {
 
   async touchBook(documentId: string): Promise<void> {
     await this.port.updateBook(documentId, { lastOpenedAt: new Date().toISOString() });
-    await this.trimRecentBooks();
   }
 
-  private async trimRecentBooks(limit = PersistenceService.MAX_RECENT_BOOKS): Promise<void> {
-    const recentBooks = await this.port.getRecentBooks(Number.MAX_SAFE_INTEGER);
-    const overflowBooks = recentBooks.slice(limit);
+  // The recent-book limit controls presentation only. Older PDF assets and
+  // reading snapshots must remain available when the same book is imported again.
 
-    await Promise.all(
-      overflowBooks.map(async (book) => {
-        await this.port.deleteBook(book.documentId);
-        await this.port.deleteWorkspace(book.documentId);
-      }),
-    );
-  }
 }
 
 export const persistenceService = new PersistenceService();

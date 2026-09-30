@@ -4,28 +4,41 @@ import { pdfService } from '../services/PDFService';
 type DocumentSource = File | string;
 
 interface BookStoreDependencies {
-  pdfService: typeof pdfService;
+  pdfService: Pick<typeof pdfService, 'loadDocument' | 'getDocumentFingerprint'>;
 }
 
-const defaultDependencies: BookStoreDependencies = {
-  pdfService,
-};
-
+const defaultDependencies: BookStoreDependencies = { pdfService };
 let dependencies: BookStoreDependencies = { ...defaultDependencies };
+let loadGeneration = 0;
+
+function normalizeTotalPages(totalPages: number): number {
+  return Number.isFinite(totalPages) ? Math.max(0, Math.floor(totalPages)) : 0;
+}
 
 function clampPage(page: number, totalPages: number): number {
-  return Math.min(Math.max(1, page), totalPages || 1);
+  const validPage = Number.isFinite(page) ? Math.round(page) : 1;
+  return Math.min(Math.max(1, validPage), totalPages || 1);
 }
 
 function clampScale(scale: number | undefined): number {
-  if (typeof scale !== 'number' || Number.isNaN(scale)) {
-    return 1;
-  }
-
+  if (typeof scale !== 'number' || !Number.isFinite(scale)) return 1;
   return Math.min(4, Math.max(0.1, scale));
 }
 
+function releaseDocumentUrl(url: string | null, nextUrl?: string | null) {
+  if (url?.startsWith('blob:') && url !== nextUrl) URL.revokeObjectURL(url);
+}
+
 export type BookStatus = 'idle' | 'loading' | 'ready' | 'error';
+export interface DocumentReadyPayload {
+  documentId: string;
+  documentName?: string | null;
+  documentUrl?: string | null;
+  totalPages: number;
+  currentPage?: number;
+  initialPage?: number;
+  scale?: number;
+}
 
 export interface BookStoreState {
   currentPage: number;
@@ -36,10 +49,11 @@ export interface BookStoreState {
   status: BookStatus;
   totalPages: number;
   scale: number;
+  clearError: () => void;
   loadDocument: (file: DocumentSource) => Promise<void>;
-  restoreDocument: (payload: { documentId: string; documentName?: string | null; documentUrl: string; totalPages: number; currentPage?: number; scale?: number }) => void;
+  restoreDocument: (payload: DocumentReadyPayload) => void;
   setCurrentPage: (page: number) => void;
-  setDocumentReady: (payload: any) => void;
+  setDocumentReady: (payload: DocumentReadyPayload) => void;
   setScale: (scale: number) => void;
   setTotalPages: (totalPages: number) => void;
   startLoading: () => void;
@@ -48,91 +62,77 @@ export interface BookStoreState {
   reset: () => void;
 }
 
+const emptyDocument = {
+  currentPage: 1, documentId: null, documentName: null, documentUrl: null,
+  error: null, totalPages: 0, scale: 1,
+};
+
 export const useBookStore = create<BookStoreState>((set, get) => ({
-  currentPage: 1,
-  documentId: null,
-  documentName: null,
-  documentUrl: null,
-  error: null,
+  ...emptyDocument,
   status: 'idle',
-  totalPages: 0,
-  scale: 1.0,
 
-  startLoading: () => set({ status: 'loading', error: null }),
+  clearError: () => set({ error: null, status: get().documentId ? 'ready' : 'idle' }),
+  startLoading: () => {
+    loadGeneration += 1;
+    releaseDocumentUrl(get().documentUrl);
+    set({ ...emptyDocument, status: 'loading' });
+  },
 
-  loadDocument: async (file: DocumentSource) => {
+  loadDocument: async (file) => {
     get().startLoading();
+    const generation = loadGeneration;
     try {
       const { numPages } = await dependencies.pdfService.loadDocument(file);
+      if (generation !== loadGeneration) throw new DOMException('文档加载已取消', 'AbortError');
       const fingerprint = dependencies.pdfService.getDocumentFingerprint();
+      if (!fingerprint) throw new Error('无法识别这份 PDF，请重新导入');
       const isRemoteSource = typeof file === 'string';
-      const blobUrl = isRemoteSource ? file : URL.createObjectURL(file);
-      const documentName = isRemoteSource ? file.split('/').pop() || 'PDF Document' : file.name;
-
-      get().setDocumentReady({
-        documentId: fingerprint,
-        documentName,
-        documentUrl: blobUrl,
-        totalPages: numPages
-      });
-    } catch (err: any) {
-      set({ status: 'error', error: err.message });
-      throw err;
+      const documentUrl = isRemoteSource ? file : URL.createObjectURL(file);
+      const documentName = isRemoteSource ? file.split('/').pop() || 'PDF 文档' : file.name;
+      get().setDocumentReady({ documentId: fingerprint, documentName, documentUrl, totalPages: numPages });
+    } catch (error) {
+      if (generation === loadGeneration) {
+        set({ ...emptyDocument, status: 'error', error: error instanceof Error ? error.message : '无法读取 PDF，请确认文件完整后重试' });
+      }
+      throw error;
     }
   },
 
   setDocumentReady: (payload) => {
-    const totalPages = payload.totalPages ?? 0;
-    const nextScale = clampScale(payload.scale);
-    const nextPage = clampPage(payload.initialPage ?? payload.currentPage ?? 1, totalPages);
-
+    loadGeneration += 1;
+    const totalPages = normalizeTotalPages(payload.totalPages);
+    const documentUrl = payload.documentUrl ?? null;
+    releaseDocumentUrl(get().documentUrl, documentUrl);
     set({
       documentId: payload.documentId,
       documentName: payload.documentName ?? null,
-      documentUrl: payload.documentUrl,
+      documentUrl,
       totalPages,
       status: 'ready',
-      currentPage: nextPage,
-      scale: nextScale,
-      error: null,
-    });
-  },
-
-  restoreDocument: (payload) => {
-    set({
-      currentPage: clampPage(payload.currentPage ?? 1, payload.totalPages),
-      documentId: payload.documentId,
-      documentName: payload.documentName ?? null,
-      documentUrl: payload.documentUrl,
-      error: null,
+      currentPage: clampPage(payload.initialPage ?? payload.currentPage ?? 1, totalPages),
       scale: clampScale(payload.scale),
-      status: 'ready',
-      totalPages: payload.totalPages,
+      error: null,
     });
   },
 
-  setCurrentPage: (page) => {
-    const { totalPages } = get();
-    set({ currentPage: clampPage(page, totalPages) });
-  },
-
+  restoreDocument: (payload) => get().setDocumentReady(payload),
+  setCurrentPage: (page) => set({ currentPage: clampPage(page, get().totalPages) }),
   setScale: (scale) => set({ scale: clampScale(scale) }),
-
-  setTotalPages: (totalPages) => set((state) => ({ totalPages, currentPage: clampPage(state.currentPage, totalPages) })),
-
+  setTotalPages: (value) => {
+    const totalPages = normalizeTotalPages(value);
+    set({ totalPages, currentPage: clampPage(get().currentPage, totalPages) });
+  },
   nextPage: () => get().setCurrentPage(get().currentPage + 1),
   previousPage: () => get().setCurrentPage(get().currentPage - 1),
-
   reset: () => {
-    if (get().documentUrl) URL.revokeObjectURL(get().documentUrl!);
-    set({ documentId: null, documentName: null, documentUrl: null, status: 'idle', totalPages: 0, currentPage: 1, scale: 1, error: null });
-  }
+    loadGeneration += 1;
+    releaseDocumentUrl(get().documentUrl);
+    set({ ...emptyDocument, status: 'idle' });
+  },
 }));
 
 export const bookStore = useBookStore;
 export const configureBookStoreDependencies = (overrides: Partial<BookStoreDependencies>) => {
   dependencies = { ...dependencies, ...overrides };
 };
-export const resetBookStoreDependencies = () => {
-  dependencies = { ...defaultDependencies };
-};
+export const resetBookStoreDependencies = () => { dependencies = { ...defaultDependencies }; };

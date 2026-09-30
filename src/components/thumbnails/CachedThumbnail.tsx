@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 import { useBookStore } from '../../stores/bookStore';
 import { useThumbnailStore } from '../../stores/thumbnailStore';
@@ -18,9 +18,10 @@ const OBSERVER_ROOT_MARGIN = '240px 320px';
 
 export const CachedThumbnail: React.FC<Props> = ({ alt, className, height, pageNumber, placeholder, priority = false, width }) => {
   const documentId = useBookStore((state) => state.documentId);
-  const [shouldLoad, setShouldLoad] = useState(priority);
+  const [intersected, setIntersected] = useState(false);
+  const shouldLoad = priority || intersected || typeof IntersectionObserver === 'undefined';
   const containerRef = useRef<HTMLDivElement>(null);
-  const key = useMemo(() => thumbnailService.getThumbnailKey(pageNumber, width), [documentId, pageNumber, width]);
+  const key = thumbnailService.getThumbnailKey(pageNumber, width);
   const entry = useThumbnailStore((state) => state.entries[key]);
   const fallbackEntry = useThumbnailStore((state) => {
     if (!documentId) {
@@ -33,26 +34,13 @@ export const CachedThumbnail: React.FC<Props> = ({ alt, className, height, pageN
   });
 
   useEffect(() => {
-    if (priority) {
-      setShouldLoad(true);
-    }
-  }, [priority]);
-
-  useEffect(() => {
     const element = containerRef.current;
-
-    if (!element || shouldLoad || typeof IntersectionObserver === 'undefined') {
-      if (!shouldLoad) {
-        setShouldLoad(true);
-      }
-
-      return;
-    }
+    if (!element || shouldLoad) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((item) => item.isIntersecting)) {
-          setShouldLoad(true);
+          setIntersected(true);
           observer.disconnect();
         }
       },
@@ -65,7 +53,7 @@ export const CachedThumbnail: React.FC<Props> = ({ alt, className, height, pageN
   }, [shouldLoad]);
 
   useEffect(() => {
-    if (!shouldLoad) {
+    if (!shouldLoad || entry?.status === 'error') {
       return;
     }
 
@@ -83,7 +71,9 @@ export const CachedThumbnail: React.FC<Props> = ({ alt, className, height, pageN
       {(entry?.status === 'ready' && entry.blobUrl) || fallbackEntry?.blobUrl ? (
         <img src={entry?.blobUrl ?? fallbackEntry?.blobUrl} alt={alt} className="h-full w-full object-contain" draggable={false} />
       ) : (
-        <>{placeholder ?? null}</>
+        entry?.status === 'error' ? (
+          <span role="img" aria-label={`${alt}暂不可用`} className="flex h-full items-center justify-center p-1 text-center text-xs text-stone-500">{pageNumber}<br />预览暂不可用</span>
+        ) : <>{placeholder ?? null}</>
       )}
     </div>
   );

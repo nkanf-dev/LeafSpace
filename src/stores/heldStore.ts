@@ -21,7 +21,7 @@ const initialState = {
 const pendingHoldPages = new Set<number>();
 
 function createDefaultName(pageNumber: number): string {
-  return `Page ${pageNumber}`;
+  return `第 ${pageNumber} 页`;
 }
 
 function sanitizeLinkedWindowIds(linkedWindowIds: string[]): string[] {

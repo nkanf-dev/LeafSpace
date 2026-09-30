@@ -54,7 +54,7 @@ LeafSpace 的设计重点不是增加尽可能多的功能点，而是让这些�
 
 ### Requirements
 
-- Node.js 20+
+- Node.js 22.12+
 - npm 10+
 
 ### Install
@@ -92,3 +92,29 @@ npm run test:e2e
 ---
 
 *页境：既是页与页之间的空间，也是用户建立知识地图的阅读环境。*
+
+## 阅读与恢复
+
+- 点击「速翻」或在阅读区按 `Space` 预览其他页面；`Esc` 取消，`Enter` 或「阅读此页」确认跳转
+- 阅读区 `←` / `→` 翻页，`↑` 夹住当前页；鼠标滚轮和触摸滚动页面，`Ctrl` / `⌘` + 滚轮缩放
+- 夹页单击回到当前焦点阅读区；双击或点击对照图标打开参考窗口。主阅读窗口不可关闭
+- 点击左上角 LeafSpace 回到书库。切换书籍、回到书库前，会先保存当前现场
+- 页码、缩放、夹页与窗口布局在操作停止后自动保存。只有真正保存完成才显示「已保存到本机」
+- 最近列表展示 3 本书，但不会删除更早书籍的 PDF 或阅读现场；重新导入同一本 PDF 可恢复
+- 文件在当前浏览器中处理，阅读现场保存在 IndexedDB。清除浏览器数据会清除本机副本；请保留原 PDF
+
+## Quality checks
+
+```bash
+npm ci
+npm run lint
+npm run build
+npm run test:unit
+npm run test:ui
+npx playwright install --with-deps chromium
+npm run test:e2e
+```
+
+`Product quality` GitHub Actions runs the same checks and uploads Playwright reports, failure traces and real desktop/tablet/mobile screenshots as `leafspace-browser-evidence`. Browser fixtures are small, generated PDFs, never personal documents. The current browser matrix covers Chromium at 1440×900, 768×1024 and 390×844; it is not a claim of Safari/Firefox coverage.
+
+See [browser coverage and evidence](src/tests/e2e/README.md) for scenarios and artifact interpretation.

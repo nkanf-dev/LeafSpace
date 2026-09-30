@@ -1,11 +1,15 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import 'pdfjs-dist/build/pdf.worker.mjs';
+import type { ThumbnailRenderRequest, ThumbnailWorkerRequest, ThumbnailWorkerResponse } from '../services/thumbnailProtocol';
 
 // 在 Worker 内部，我们直接从核心库加载，不再设置 GlobalWorkerOptions.workerSrc
 // 并且通过 side-effect import 将 WorkerMessageHandler 挂到 globalThis.pdfjsWorker，
 // 让 getDocument 在当前 worker 内走 fake-worker 模式，而不是再尝试启动二级 worker。
 
-const worker = self as any;
+const worker = self as unknown as {
+  postMessage: (message: ThumbnailWorkerResponse) => void;
+  onmessage: ((event: MessageEvent<ThumbnailWorkerRequest>) => void) | null;
+};
 let currentDocumentId: string | null = null;
 let currentLoadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null;
 let currentDocument: pdfjsLib.PDFDocumentProxy | null = null;
@@ -46,7 +50,7 @@ async function ensureDocumentLoaded(documentId: string, source: ArrayBuffer) {
   worker.postMessage({ type: 'document-ready', documentId });
 }
 
-async function renderThumbnail(message: any) {
+async function renderThumbnail(message: ThumbnailRenderRequest) {
   if (message.documentId !== currentDocumentId || !currentDocument) {
     throw new Error('Thumbnail document is not ready.');
   }
@@ -71,9 +75,11 @@ async function renderThumbnail(message: any) {
     context.fillRect(0, 0, canvas.width, canvas.height);
 
     await page.render({
-      canvasContext: context as any,
+      // PDF.js accepts the compatible offscreen 2D context at runtime;
+      // its published DOM-only type does not include OffscreenCanvas yet.
+      canvasContext: context as unknown as CanvasRenderingContext2D,
       viewport,
-      canvas: null as any,
+      canvas: null,
     }).promise;
 
     const blob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.8 });
@@ -92,32 +98,29 @@ async function renderThumbnail(message: any) {
   }
 }
 
-worker.onmessage = async (event: MessageEvent<any>) => {
+worker.onmessage = (event: MessageEvent<ThumbnailWorkerRequest>) => {
   const message = event.data;
-  if (message.type === 'load-document') {
+  // Loading and rendering must share a queue: a new document cannot destroy
+  // the PDF proxy while an earlier thumbnail is still being rendered.
+  renderQueue = renderQueue.then(async () => {
+    if (message.type === 'load-document') {
+      try {
+        await ensureDocumentLoaded(message.documentId, message.source);
+      } catch (error) {
+        worker.postMessage({
+          type: 'document-error', documentId: message.documentId,
+          error: error instanceof Error ? error.message : 'Failed to load thumbnail document',
+        });
+      }
+      return;
+    }
     try {
-      await ensureDocumentLoaded(message.documentId, message.source);
-    } catch (error: any) {
+      await renderThumbnail(message);
+    } catch (error) {
       worker.postMessage({
-        type: 'document-error',
-        documentId: message.documentId,
-        error: error.message || 'Failed to load thumbnail document',
+        type: 'error', id: message.id, key: message.key, pageNumber: message.pageNumber,
+        error: error instanceof Error ? error.message : 'Unknown worker error',
       });
     }
-    return;
-  }
-
-  if (message.type !== 'render') return;
-
-  renderQueue = renderQueue
-    .then(() => renderThumbnail(message))
-    .catch((error: any) => {
-      worker.postMessage({
-        type: 'error',
-        error: error.message || 'Unknown Worker Error',
-        id: message.id,
-        key: message.key,
-        pageNumber: message.pageNumber,
-      });
-    });
+  }).catch(() => undefined);
 };

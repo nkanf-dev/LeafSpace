@@ -18,7 +18,7 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [isResizingSplit, setIsResizingSplit] = useState(false);
-  const [splitRatio, setSplitRatio] = useState(0.64);
+
   const dragOffset = useRef({ x: 0, y: 0 });
   const resizeStart = useRef({ x: 0, y: 0, w: 0, h: 0 });
   const splitResizeStart = useRef({ x: 0, ratio: 0.64 });
@@ -43,14 +43,10 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
   const mainWindow = windows.find(w => w.type === 'main');
   const floatingWindows = windows.filter(w => w.type !== 'main' && w.dockMode === 'none');
 
-  useEffect(() => {
-    if (dockedWindow?.splitRatio) {
-      setSplitRatio(clamp(dockedWindow.splitRatio, 0.35, 0.8));
-    }
-  }, [dockedWindow?.id, dockedWindow?.splitRatio]);
+  const splitRatio = clamp(dockedWindow?.splitRatio ?? 0.64, 0.35, 0.8);
 
   const handleMouseDown = (e: React.MouseEvent, win: ReaderWindow) => {
-    if (win.type === 'main' || win.dockMode !== 'none') return;
+    if (win.type === 'main' || win.dockMode !== 'none' || (e.target instanceof Element && e.target.closest('button'))) return;
     e.preventDefault();
     setDraggingId(win.id);
     const windowEl = e.currentTarget.closest('[data-floating-window]') as HTMLElement;
@@ -72,15 +68,15 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
     splitResizeStart.current = { x: e.clientX, ratio: splitRatio };
   };
 
-  const handleMouseMove = useCallback((e: MouseEvent) => {
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
     if (!workspaceRef.current) return;
     const workspaceRect = workspaceRef.current.getBoundingClientRect();
 
-    if (isResizingSplit) {
+    if (isResizingSplit && dockedWindow) {
       const deltaX = e.clientX - splitResizeStart.current.x;
       const nextRatio = splitResizeStart.current.ratio + deltaX / workspaceRect.width;
       const clampedRatio = clamp(nextRatio, 0.35, 0.8);
-      setSplitRatio(clampedRatio);
 
       if (dockedWindow) {
         onWindowUpdate({ ...dockedWindow, splitRatio: clampedRatio });
@@ -96,8 +92,8 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
         const height = win.height || 560;
         const nextX = clamp(e.clientX - workspaceRect.left - dragOffset.current.x, 12, Math.max(12, workspaceRect.width - width - 12));
         const nextY = clamp(e.clientY - workspaceRect.top - dragOffset.current.y, 12, Math.max(12, workspaceRect.height - height - 12));
-        onWindowUpdate({ 
-          ...win, 
+        onWindowUpdate({
+          ...win,
           x: nextX,
           y: nextY,
         });
@@ -112,16 +108,15 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
         const deltaY = e.clientY - resizeStart.current.y;
         const maxWidth = Math.max(280, workspaceRect.width - (win.x || 0) - 16);
         const maxHeight = Math.max(280, workspaceRect.height - (win.y || 0) - 16);
-        onWindowUpdate({ 
-          ...win, 
-          width: clamp(resizeStart.current.w + deltaX, 280, maxWidth), 
-          height: clamp(resizeStart.current.h + deltaY, 280, maxHeight), 
+        onWindowUpdate({
+          ...win,
+          width: clamp(resizeStart.current.w + deltaX, 280, maxWidth),
+          height: clamp(resizeStart.current.h + deltaY, 280, maxHeight),
         });
       }
     }
-  }, [dockedWindow, draggingId, isResizingSplit, onWindowUpdate, resizingId]);
+    };
 
-  useEffect(() => {
     const up = () => { setDraggingId(null); setResizingId(null); setIsResizingSplit(false); };
     if (draggingId || resizingId || isResizingSplit) {
       window.addEventListener('mousemove', handleMouseMove);
@@ -133,20 +128,14 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
       window.removeEventListener('mouseup', up);
       document.body.classList.remove('is-panning');
     };
-  }, [draggingId, resizingId, isResizingSplit, handleMouseMove]);
-
-  useEffect(() => {
-    if (!dockedWindow) {
-      setIsResizingSplit(false);
-    }
-  }, [dockedWindow]);
+  }, [dockedWindow, draggingId, resizingId, isResizingSplit, onWindowUpdate]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#edece9]" ref={workspaceRef}>
-      <div className="flex h-full w-full min-w-0 bg-[var(--border)]">
+      <div className="workspace-split flex h-full w-full min-w-0 bg-[var(--border)]">
         {mainWindow && (
           <div
-            className={`min-h-0 min-w-0 flex flex-col overflow-hidden bg-[var(--surface)] ${mainWindow.isActive ? '' : ''}`}
+            className={`workspace-main min-h-0 min-w-0 flex flex-col overflow-hidden bg-[var(--surface)] ${mainWindow.isActive ? '' : ''}`}
             style={dockedWindow ? { width: `calc(${splitRatio * 100}% - 2px)` } : { width: '100%' }}
           >
             <ReaderViewport isMain={true} windowId={mainWindow.id} />
@@ -158,13 +147,20 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
               role="separator"
               aria-orientation="vertical"
               aria-label="调整主窗口与分栏宽度"
+              tabIndex={0}
+              aria-valuemin={35} aria-valuemax={80} aria-valuenow={Math.round(splitRatio * 100)}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                event.preventDefault();
+                onWindowUpdate({ ...dockedWindow, splitRatio: clamp(splitRatio + (event.key === 'ArrowRight' ? 0.05 : -0.05), 0.35, 0.8) });
+              }}
               className={`group relative w-1 shrink-0 cursor-col-resize bg-[var(--border)] transition hover:bg-stone-500 ${isResizingSplit ? 'bg-stone-900' : ''}`}
               onMouseDown={handleSplitResizeStart}
             >
               <div className="absolute inset-y-0 left-1/2 w-4 -translate-x-1/2" />
               <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent group-hover:bg-stone-900" />
             </div>
-            <div className="min-h-0 min-w-0 flex flex-col overflow-hidden bg-[var(--surface)]" style={{ width: `calc(${(1 - splitRatio) * 100}% - 2px)` }}>
+            <div className="workspace-docked min-h-0 min-w-0 flex flex-col overflow-hidden bg-[var(--surface)]" style={{ width: `calc(${(1 - splitRatio) * 100}% - 2px)` }}>
             <div className="flex h-9 items-center gap-3 border-b border-[var(--border)] bg-[#f3f1ed] px-4">
               <span className="bg-stone-900 px-1.5 py-0.5 text-[0.6rem] font-extrabold text-white">对比</span>
               <span className="min-w-0 flex-1 truncate text-[0.8rem] font-semibold text-stone-500">{dockedWindow.title}</span>
@@ -188,11 +184,12 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
       </div>
 
       {floatingWindows.map(win => (
-        <div 
-          key={win.id} 
+        <div
+          key={win.id}
           data-floating-window
-          className={`absolute flex flex-col overflow-hidden border bg-[var(--surface)] shadow-[0_20px_60px_rgba(0,0,0,0.15)] ${win.isActive ? 'border-stone-900 shadow-[0_30px_100px_rgba(0,0,0,0.25)]' : 'border-[var(--border)]'}`}
-          style={{ zIndex: win.zIndex, left: win.x, top: win.y, width: win.width, height: win.height }} 
+          role="region" aria-label={`参考窗口，第 ${win.pageNumber} 页`}
+          className={`reader-floating-window absolute flex flex-col overflow-hidden border bg-[var(--surface)] shadow-[0_20px_60px_rgba(0,0,0,0.15)] ${win.isActive ? 'border-stone-900 shadow-[0_30px_100px_rgba(0,0,0,0.25)]' : 'border-[var(--border)]'}`}
+          style={{ zIndex: win.zIndex, left: `clamp(8px, ${win.x ?? 32}px, max(8px, 100% - min(${win.width ?? 420}px, 100% - 16px) - 8px))`, top: `clamp(8px, ${win.y ?? 32}px, max(8px, 100% - min(${win.height ?? 560}px, 100% - 16px) - 8px))`, width: `min(${win.width ?? 420}px, calc(100% - 16px))`, height: `min(${win.height ?? 560}px, calc(100% - 16px))` }}
           onMouseDown={() => !win.isActive && raiseWindow(win)}
         >
           <div className="flex h-8 items-center gap-2 border-b border-[var(--border)] bg-[#f3f1ed] px-3" onMouseDown={(e) => handleMouseDown(e, win)}>
