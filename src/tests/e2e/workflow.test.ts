@@ -1,4 +1,4 @@
-import { test, expect, importBook, reader, expectMainPage, navigateTo, quickFlip, openQuickFlip, holdCurrentPage } from './helpers';
+import { test, expect, importBook, reader, expectMainPage, navigateTo, quickFlip, openQuickFlip, holdCurrentPage, expectQuickFlipThumbnail } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
@@ -66,6 +66,7 @@ test.describe('Quick Flip selection and keyboard isolation', () => {
     for (const target of [4, 8, 2]) {
       await openQuickFlip(page);
       await quickFlip(page).getByRole('button', { name: `选择第 ${target} 页`, exact: true }).click();
+      await expectQuickFlipThumbnail(page, target);
       await page.keyboard.press('Enter');
       await expect(quickFlip(page)).toHaveCount(0);
       await expectMainPage(page, target);
@@ -168,5 +169,57 @@ test.describe('Held pages and comparison windows', () => {
     await expect(page.locator('[data-floating-window]')).toHaveCount(0);
     await expect(page.getByRole('button', { name: '打开第 1 页参考窗口', exact: true })).toHaveCount(0);
     await expectMainPage(page, 1);
+  });
+});
+
+test.describe('Held-page navigation contracts and Escape priority', () => {
+  test('single-click reads a held page in the main reader without opening a comparison', async ({ page }) => {
+    await holdCurrentPage(page, 1);
+    await navigateTo(page, 4);
+    await page.getByRole('button', { name: '阅读第 1 页', exact: true }).click();
+    await expectMainPage(page, 1);
+    await expect(page.locator('[data-floating-window]')).toHaveCount(0);
+  });
+
+  test('single-click reads a held page in the focused comparison and preserves the main page', async ({ page }) => {
+    await navigateTo(page, 2);
+    await holdCurrentPage(page, 2);
+    await navigateTo(page, 5);
+    await holdCurrentPage(page, 5);
+    await navigateTo(page, 8);
+    await page.getByRole('button', { name: '打开第 2 页参考窗口', exact: true }).click();
+    await page.getByRole('region', { name: '参考阅读区，第 2 页', exact: true }).focus();
+    await page.getByRole('button', { name: '阅读第 5 页', exact: true }).click();
+    await expect(page.getByRole('region', { name: '参考阅读区，第 5 页', exact: true }).locator('canvas')).toBeVisible();
+    await expectMainPage(page, 8);
+    await expect(page.locator('[data-floating-window]')).toHaveCount(1);
+  });
+
+  test('double-click opens a comparison for a held page', async ({ page }) => {
+    await navigateTo(page, 3);
+    await holdCurrentPage(page, 3);
+    await navigateTo(page, 6);
+    await page.getByRole('button', { name: '阅读第 3 页', exact: true }).dblclick();
+    await expect(page.locator('[data-floating-window]')).toHaveCount(1);
+    await expect(page.getByRole('region', { name: '参考阅读区，第 3 页', exact: true }).locator('canvas')).toBeVisible();
+  });
+
+  test('Escape closes the top comparison first and never closes the main reader', async ({ page }) => {
+    await navigateTo(page, 2);
+    await holdCurrentPage(page, 2);
+    await navigateTo(page, 5);
+    await holdCurrentPage(page, 5);
+    await page.getByRole('button', { name: '打开第 2 页参考窗口', exact: true }).click();
+    await page.getByRole('button', { name: '打开第 5 页参考窗口', exact: true }).click();
+    await expect(page.locator('[data-floating-window]')).toHaveCount(2);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-floating-window]')).toHaveCount(1);
+    await expect(page.getByRole('region', { name: '参考阅读区，第 2 页', exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: '参考阅读区，第 5 页', exact: true })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-floating-window]')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expectMainPage(page, 5);
+    await expect(reader(page)).toBeFocused();
   });
 });

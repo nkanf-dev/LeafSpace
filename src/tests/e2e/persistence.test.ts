@@ -1,4 +1,4 @@
-import { test, expect, importBook, reader, expectMainPage, navigateTo, holdCurrentPage, snapshots, reopenRecent, BOOK_PATH, OTHER_BOOK_PATH } from './helpers';
+import { test, expect, importBook, reader, expectMainPage, navigateTo, holdCurrentPage, snapshots, reopenRecent, seedStorageFault, BOOK_PATH, OTHER_BOOK_PATH } from './helpers';
 
 test.beforeEach(async ({ page }) => { await page.goto('/'); await importBook(page); });
 
@@ -80,4 +80,54 @@ test('switching documents immediately preserves the outgoing reading position', 
   await expectMainPage(page, 1);
   await importBook(page, BOOK_PATH);
   await expectMainPage(page, 2);
+});
+
+test('malformed saved layout reports a recoverable error without orphan references', async ({ page }) => {
+  await navigateTo(page, 4);
+  await holdCurrentPage(page, 4);
+  await page.getByRole('button', { name: '打开第 4 页参考窗口', exact: true }).click();
+  await page.getByRole('button', { name: '回到书库', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '页境阅读' })).toBeVisible();
+  const snapshot = (await snapshots(page))[0];
+  await seedStorageFault(page, 'workspaces', snapshot.documentId, { ...snapshot, heldPages: null });
+  await page.getByRole('button', { name: /leafspace-12-pages\.pdf/ }).click();
+  await expect(page.getByRole('alert')).toContainText('保存的阅读现场无法恢复');
+  await expect(page.getByRole('button', { name: '重试恢复', exact: true })).toBeVisible();
+  await expectMainPage(page, 1);
+  await expect(page.locator('[data-floating-window]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '阅读第 4 页', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '保存现场', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect.poll(async () => Array.isArray((await snapshots(page))[0]?.heldPages)).toBe(true);
+  await reopenRecent(page);
+  await expectMainPage(page, 1);
+});
+
+test('a partial legacy snapshot restores a safe main reader and default zoom', async ({ page }) => {
+  await page.getByRole('button', { name: '回到书库', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '页境阅读' })).toBeVisible();
+  const snapshot = (await snapshots(page))[0];
+  await seedStorageFault(page, 'workspaces', snapshot.documentId, { heldPages: [], windows: [], savedAt: snapshot.savedAt });
+  await page.getByRole('button', { name: /leafspace-12-pages\.pdf/ }).click();
+  await expectMainPage(page, 1);
+  await expect(page.getByText('100%', { exact: true })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.locator('[data-floating-window]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '保存现场', exact: true })).toBeEnabled();
+});
+
+test('a missing recent PDF shows an actionable error and re-import restores its saved position', async ({ page }) => {
+  await navigateTo(page, 3);
+  await page.getByRole('button', { name: '回到书库', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '页境阅读' })).toBeVisible();
+  const snapshot = (await snapshots(page))[0];
+  // Keep the already-displayed recent card while simulating externally cleared storage.
+  await seedStorageFault(page, 'books', snapshot.documentId, null);
+  await page.getByRole('button', { name: /leafspace-12-pages\.pdf/ }).click();
+  await expect(page.getByRole('alert')).toContainText('未找到这本书的本地副本');
+  await expect(page.getByRole('button', { name: '重新导入', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '页境阅读' })).toBeVisible();
+  await importBook(page);
+  await expectMainPage(page, 3);
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });

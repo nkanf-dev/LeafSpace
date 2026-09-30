@@ -7,4 +7,4 @@ These PDFs are generated in this repository and contain no personal, licensed, o
 
 Regenerate deterministically with `node src/tests/fixtures/generate-pdf.mjs`.
 
-The E2E suite uses a fresh browser context (including isolated IndexedDB) per test. It imports fixtures through the real file input, drives public UI controls, and reads IndexedDB only to wait for durable saves. It never injects application-store state.
+The E2E suite uses a fresh browser context (including isolated IndexedDB) per test. It imports fixtures through the real file input, drives public UI controls, and reads IndexedDB to wait for durable saves. Recovery tests seed faults only in their isolated synthetic-book IndexedDB records. The suite never injects application-store state.

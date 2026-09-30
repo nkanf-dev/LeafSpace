@@ -39,11 +39,8 @@ body {
   color: var(--ink);
 }
 
-button,
-input,
-select,
-textarea {
-  font: inherit;
+@layer base {
+  button, input, select, textarea { font: inherit; }
 }
 
 button:focus-visible,
@@ -129,4 +126,9 @@ button:disabled { cursor: not-allowed; }
   .workspace-split:has(.workspace-docked) .workspace-main,
   .workspace-docked { width: 100% !important; height: 50%; }
   .workspace-split > [role="separator"] { display: none; }
+}
+
+@media (max-height: 600px) {
+  .quick-flip-help { display: none; }
+  .quick-flip-title { font-size: 1.5rem; }
 }

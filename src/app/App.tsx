@@ -28,6 +28,17 @@ function App() {
   const [showHeldPages, setShowHeldPages] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importLock = useRef(false);
+  const quickFlipOpener = useRef<HTMLElement | null>(null);
+  const showQuickFlip = useCallback((page: number) => {
+    quickFlipOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    openQuickFlip(page);
+  }, [openQuickFlip]);
+  const dismissQuickFlip = useCallback(() => {
+    closeQuickFlip();
+    // React removes background inertness during the commit. Restore focus after it,
+    // using the opener captured before inert moved focus away from the reader.
+    window.requestAnimationFrame(() => quickFlipOpener.current?.focus());
+  }, [closeQuickFlip]);
   const heldToggleRef = useRef<HTMLButtonElement>(null);
   const heldBackRef = useRef<HTMLButtonElement>(null);
   const closeHeldPanel = () => { setShowHeldPages(false); heldToggleRef.current?.focus(); };
@@ -83,16 +94,31 @@ function App() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.key === 'Escape' && !isQuickFlipVisible) {
+        if (showHeldPages) {
+          event.preventDefault();
+          setShowHeldPages(false);
+          heldToggleRef.current?.focus();
+          return;
+        }
+        const topWindow = useWindowStore.getState().windows.filter((win) => win.canClose).sort((left, right) => right.zIndex - left.zIndex)[0];
+        if (topWindow) {
+          event.preventDefault();
+          useWindowStore.getState().closeWindow(topWindow.id);
+          document.querySelector<HTMLElement>('[aria-label="主阅读区"]')?.focus();
+        }
+        return;
+      }
       if (event.target instanceof Element && event.target.closest('button, input, textarea, select, a, [contenteditable="true"], [role="dialog"]')) return;
       if (event.key === ' ' && ready) {
         event.preventDefault();
-        if (isQuickFlipVisible) closeQuickFlip();
-        else openQuickFlip(currentPage);
+        if (isQuickFlipVisible) dismissQuickFlip();
+        else showQuickFlip(currentPage);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [ready, isQuickFlipVisible, currentPage, openQuickFlip, closeQuickFlip]);
+  }, [ready, isQuickFlipVisible, currentPage, showQuickFlip, dismissQuickFlip, showHeldPages]);
 
   const returnToLibrary = async () => {
     if (!ready || importLock.current) return;
@@ -156,7 +182,7 @@ function App() {
         </div>}
 
         {documentId && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2 sm:px-6">
-          <button className={outlineButton} disabled={!ready} onClick={() => openQuickFlip(currentPage)}><BookOpen size={16} />速翻<span className="hidden text-xs text-stone-400 sm:inline">Space</span></button>
+          <button className={outlineButton} disabled={!ready} onClick={() => showQuickFlip(currentPage)}><BookOpen size={16} />速翻<span className="hidden text-xs text-stone-400 sm:inline">Space</span></button>
           <button className={outlineButton} disabled={!ready} onClick={() => void holdPage(currentPage)}><BookmarkPlus size={16} />{heldPages.some((page) => page.pageNumber === currentPage) ? '已夹住此页' : '夹住此页'}</button>
           <button ref={heldToggleRef} className={`${outlineButton} ml-auto lg:hidden`} aria-expanded={showHeldPages} aria-controls="held-pages-panel" onClick={() => showHeldPages ? closeHeldPanel() : setShowHeldPages(true)}><Layers size={16} />夹页 {heldPages.length}</button>
           <span className="ml-auto hidden text-xs text-stone-500 lg:block">滚轮阅读 · Ctrl / ⌘ + 滚轮缩放</span>
@@ -195,12 +221,17 @@ function App() {
           </section>
           {documentId && <aside id="held-pages-panel" aria-label="夹页列表" className={`${showHeldPages ? 'absolute inset-0 z-30 flex' : 'hidden'} min-h-0 w-full shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface)] lg:static lg:flex lg:w-[280px]`}>
             <button ref={heldBackRef} className="min-h-11 border-b border-[var(--border)] px-5 text-left text-sm lg:hidden" onClick={closeHeldPanel}>← 返回阅读</button>
-            <HeldPagesPanel pages={heldPages} onPageClick={(page) => { openInNewWindow(page.pageNumber); closeHeldPanel(); }} onRemovePage={(id) => { const page = heldPages.find((candidate) => candidate.id === id); if (page) { useWindowStore.getState().closeWindowsForPage(page.pageNumber); unholdPage(page.pageNumber); } }} />
+            <HeldPagesPanel pages={heldPages} onReadPage={(page) => {
+              const active = windows.find((win) => win.id === activeWindowId);
+              if (!active || active.type === 'main') useWindowStore.getState().openInMain(page.pageNumber);
+              else updateWindow(active.id, { pageNumber: page.pageNumber, title: `第 ${page.pageNumber} 页` });
+              closeHeldPanel();
+            }} onPageClick={(page) => { openInNewWindow(page.pageNumber); closeHeldPanel(); }} onRemovePage={(id) => { const page = heldPages.find((candidate) => candidate.id === id); if (page) { useWindowStore.getState().closeWindowsForPage(page.pageNumber); unholdPage(page.pageNumber); } }} />
           </aside>}
         </main>
         {documentId && <footer className="h-16 shrink-0 border-t border-[var(--border)]"><TimelineBar currentPage={currentPage} totalPages={totalPages} onPageClick={jumpToPage} markers={heldPages.map((page) => page.pageNumber)} /></footer>}
       </div>
-      {isQuickFlipVisible && ready && <QuickFlipOverlay isVisible onClose={closeQuickFlip} currentPage={currentPage} totalPages={totalPages} onPageChange={jumpToPage} />}
+      {isQuickFlipVisible && ready && <QuickFlipOverlay isVisible onClose={dismissQuickFlip} currentPage={currentPage} totalPages={totalPages} onPageChange={jumpToPage} />}
     </>
   );
 }

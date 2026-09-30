@@ -1,7 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5173';
+const externalBaseURL = process.env.PLAYWRIGHT_BASE_URL;
+const baseURL = externalBaseURL || 'http://127.0.0.1:4173';
 
 export default defineConfig({
   testDir: './src/tests/e2e',
@@ -34,10 +35,12 @@ export default defineConfig({
       use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 }, defaultBrowserType: 'chromium' },
     },
   ],
-  webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 5173 --strictPort',
+  // Test the deployable bundle. Vite dev can discover dependencies while PDF
+  // workers load and force a page reload, discarding a test's in-memory book.
+  webServer: externalBaseURL ? undefined : {
+    command: 'npm run build && npm run preview -- --host 127.0.0.1 --port 4173 --strictPort',
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 30_000,
   },
 });

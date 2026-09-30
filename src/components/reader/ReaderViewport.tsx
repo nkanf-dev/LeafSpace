@@ -36,6 +36,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   const storedScale = isMain ? globalScale : (currentWindow?.viewport?.scale ?? 1);
   
   const [scale, setScale] = useState(storedScale);
+  const [pageWidth, setPageWidth] = useState(612);
   const [mode, setMode] = useState<InteractionMode>(storedMode);
   
   const containerRef = useRef<HTMLDivElement>(null);
@@ -116,8 +117,11 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
       return;
     }
 
-    const horizontalPadding = 80;
-    const verticalPadding = 120;
+    const horizontalPadding = window.innerWidth < 640 ? 32 : 80;
+    const verticalPadding = window.innerWidth < 640 ? 48 : 120;
+    // 100% is a paper-sized page that fits the current reader. Zoom stays relative
+    // to that baseline so mobile and narrow comparison panes are readable by default.
+    if (container.clientWidth > 0) setPageWidth(Math.min(612, Math.max(1, container.clientWidth - horizontalPadding)));
     const availableWidth = Math.max(0, container.clientWidth - horizontalPadding);
     const availableHeight = Math.max(0, container.clientHeight - verticalPadding);
 
@@ -441,6 +445,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
               >
                 <Page
                   pageNumber={activePage}
+                  width={pageWidth}
                   scale={scale}
                   className="border border-[#e0ddd5] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.05),0_30px_100px_rgba(0,0,0,0.1)]"
                   renderTextLayer={true}

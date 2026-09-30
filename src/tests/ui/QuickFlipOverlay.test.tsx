@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuickFlipOverlay } from '../../components/quick-flip/QuickFlipOverlay';
 import { useBookStore } from '../../stores/bookStore';
 import { heldStore } from '../../stores/heldStore';
+import { thumbnailStore } from '../../stores/thumbnailStore';
+import { thumbnailService } from '../../services/ThumbnailService';
 import { windowStore } from '../../stores/windowStore';
 
 vi.mock('../../services/ThumbnailService', () => ({
@@ -33,6 +35,8 @@ function pageButton(page: number) {
 describe('QuickFlipOverlay', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    thumbnailStore.getState().reset();
+    vi.mocked(thumbnailService.ensureThumbnails).mockClear();
     useBookStore.getState().reset();
     heldStore.getState().reset();
     windowStore.getState().reset();
@@ -41,7 +45,11 @@ describe('QuickFlipOverlay', () => {
       totalPages: 100, initialPage: 10,
     });
   });
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
 
   it('renders the named dialog with keyboard help when visible', () => {
     render(<QuickFlipOverlay {...props()} />);
@@ -218,6 +226,52 @@ describe('QuickFlipOverlay', () => {
     act(() => vi.advanceTimersByTime(2_000));
     expect(screen.getByText(/第 \d+ 页 \/ 共 100 页/)).toHaveTextContent(positionAfterBlur!);
     expect(callbacks.onPageChange).not.toHaveBeenCalled();
+  });
+
+
+  it('retries visible preview thumbnails without navigating or closing the dialog', async () => {
+    thumbnailStore.getState().markQueued({ key: 'quick-flip-test_10_176', pageNumber: 10, width: 176 });
+    thumbnailStore.getState().markError('quick-flip-test_10_176');
+    const callbacks = props();
+    render(<QuickFlipOverlay {...callbacks} />);
+    const retry = screen.getByRole('button', { name: '重试预览' });
+    expect(screen.getByText(/部分预览暂不可用/)).toBeInTheDocument();
+    vi.mocked(thumbnailService.ensureThumbnails).mockClear();
+    const renderedPages = screen.getAllByRole('button', { name: /^选择第 \d+ 页$/ })
+      .map(button => Number(button.getAttribute('data-page')));
+    await act(async () => fireEvent.click(retry));
+    expect(thumbnailService.ensureThumbnails).toHaveBeenCalledExactlyOnceWith(renderedPages, 176);
+    expect(callbacks.onPageChange).not.toHaveBeenCalled();
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+    act(() => thumbnailStore.getState().markReady({ key: 'quick-flip-test_10_176', width: 176, height: 252, blobUrl: 'blob:preview' }));
+    expect(screen.queryByRole('button', { name: '重试预览' })).not.toBeInTheDocument();
+  });
+
+  it('does not expose preview retry for errors belonging to another document', () => {
+    thumbnailStore.getState().markQueued({ key: 'another-book_10_176', pageNumber: 10, width: 176 });
+    thumbnailStore.getState().markError('another-book_10_176');
+    render(<QuickFlipOverlay {...props()} />);
+    expect(screen.queryByRole('button', { name: '重试预览' })).not.toBeInTheDocument();
+  });
+
+
+  it('aligns the selected thumbnail without animation when reduced motion is preferred', () => {
+    const matchMedia = vi.fn().mockReturnValue({ matches: true });
+    vi.stubGlobal('matchMedia', matchMedia);
+    render(<QuickFlipOverlay {...props()} />);
+    const selected = pageButton(12);
+    const strip = selected.closest('.quick-flip-strip');
+    if (!(strip instanceof HTMLElement)) throw new Error('Thumbnail strip was not rendered');
+    vi.spyOn(strip, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 960, 360));
+    vi.spyOn(selected, 'getBoundingClientRect').mockReturnValue(new DOMRect(720, 0, 240, 360));
+    Object.defineProperty(strip, 'clientWidth', { configurable: true, value: 960 });
+    Object.defineProperty(selected, 'clientWidth', { configurable: true, value: 240 });
+    const requestFrame = vi.spyOn(window, 'requestAnimationFrame');
+    fireEvent.click(selected);
+    expect(matchMedia).toHaveBeenCalledWith('(prefers-reduced-motion: reduce)');
+    expect(strip.scrollLeft).toBeGreaterThan(0);
+    expect(selected).toHaveAttribute('aria-pressed', 'true');
+    expect(requestFrame).not.toHaveBeenCalled();
   });
 
 });

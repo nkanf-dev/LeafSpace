@@ -87,3 +87,32 @@ export async function reopenRecent(page: Page, bookName = BOOK_NAME) {
   await expect(reader(page).locator('canvas').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('button', { name: '导入书籍', exact: true })).toBeEnabled();
 }
+
+/** Seed a storage fault only inside the isolated synthetic-book test context. */
+export async function seedStorageFault(page: Page, storeName: 'books' | 'workspaces', documentId: string, value: Record<string, unknown> | null) {
+  await page.evaluate(({ storeName, documentId, value }) => new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open('leafspace');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const transaction = database.transaction(storeName, 'readwrite');
+      const store = transaction.objectStore(storeName);
+      if (value === null) store.delete(documentId);
+      else store.put({ ...value, documentId });
+      transaction.oncomplete = () => { database.close(); resolve(); };
+      transaction.onerror = () => { database.close(); reject(transaction.error); };
+      transaction.onabort = () => { database.close(); reject(transaction.error); };
+    };
+  }), { storeName, documentId, value });
+}
+
+/** Wait for decoded PDF pixels, not a numbered placeholder or a fallback label. */
+export async function expectQuickFlipThumbnail(page: Page, number: number) {
+  const selected = quickFlip(page).getByRole('button', { name: `选择第 ${number} 页`, exact: true });
+  await expect(selected).toHaveAttribute('aria-pressed', 'true');
+  const image = selected.locator('img');
+  await expect(image).toBeVisible();
+  await expect.poll(() => image.evaluate((element) => element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0 && element.naturalHeight > 0), {
+    message: `Selected page ${number} has a decoded PDF thumbnail`,
+  }).toBe(true);
+}

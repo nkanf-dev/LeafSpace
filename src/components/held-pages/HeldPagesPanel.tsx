@@ -1,16 +1,23 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { HeldPage } from '../../types/domain';
-import { LayoutGrid, List, X } from 'lucide-react';
+import { LayoutGrid, List, X, Columns2 } from 'lucide-react';
 import { CachedThumbnail } from '../thumbnails/CachedThumbnail';
 
 interface Props {
   pages: HeldPage[];
   onPageClick: (page: HeldPage) => void;
+  onReadPage?: (page: HeldPage) => void;
   onRemovePage: (id: string) => void;
 }
 
-export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onRemovePage }) => {
+export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onReadPage, onRemovePage }) => {
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
+  const readTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPendingRead = () => {
+    if (readTimer.current !== null) clearTimeout(readTimer.current);
+    readTimer.current = null;
+  };
+  useEffect(() => () => { if (readTimer.current !== null) clearTimeout(readTimer.current); }, []);
   return (
     <div className="flex h-full flex-col bg-[var(--surface)]">
       <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4 text-sm font-semibold text-stone-600">
@@ -24,11 +31,15 @@ export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onRemovePa
         {pages.length === 0 ? (
           <div className="px-6 py-14 text-center text-sm leading-6 text-stone-500">
             <p className="mb-2 text-lg text-stone-700">留住值得对照的一页</p>
-            <p>在阅读区按 ↑，或点击「夹住此页」。再点击夹页，即可打开参考窗口。</p>
+            <p>在阅读区按 ↑，或点击「夹住此页」。点击夹页回到该页；双击或点击对照按钮，打开参考窗口。</p>
           </div>
         ) : pages.map((page) => (
           <div key={page.id} className={`relative mx-3 my-3 flex overflow-hidden border bg-white ${page.isOpen ? 'border-stone-700' : 'border-[var(--border)]'}`}>
-            <button type="button" aria-label={`打开第 ${page.pageNumber} 页参考窗口`} onClick={() => onPageClick(page)} className="flex min-w-0 flex-1 items-center text-left transition hover:bg-stone-50">
+            <button type="button" aria-label={`阅读第 ${page.pageNumber} 页`} onClick={(event) => {
+              cancelPendingRead();
+              if (event.detail === 0) (onReadPage ?? onPageClick)(page);
+              else if (event.detail === 1) readTimer.current = setTimeout(() => (onReadPage ?? onPageClick)(page), 220);
+            }} onDoubleClick={() => { cancelPendingRead(); onPageClick(page); }} className="flex min-w-0 flex-1 items-center text-left transition hover:bg-stone-50">
               {viewMode === 'card' && <CachedThumbnail alt={`第 ${page.pageNumber} 页缩略图`} className="shrink-0 bg-[#f0ede9]" height={80} width={60} pageNumber={page.pageNumber} priority placeholder={<span className="p-3 text-stone-400">{page.pageNumber}</span>} />}
               <span className="min-w-0 flex-1 p-3">
                 <span className="block text-xs text-stone-500">第 {page.pageNumber} 页{page.isOpen ? ' · 已打开' : ''}</span>
@@ -36,7 +47,10 @@ export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onRemovePa
                 {page.note && <span className="mt-1 block truncate text-xs text-stone-500">{page.note}</span>}
               </span>
             </button>
+            <div className="flex shrink-0 flex-col">
+            <button type="button" className="p-3 text-stone-500 hover:text-stone-900" aria-label={`打开第 ${page.pageNumber} 页参考窗口`} title="打开参考窗口" onClick={() => { cancelPendingRead(); onPageClick(page); }}><Columns2 size={16} /></button>
             <button type="button" className="self-start p-3 text-stone-400 hover:text-red-700" onClick={() => onRemovePage(page.id)} aria-label={`移除第 ${page.pageNumber} 页夹页`} title="移除"><X size={16} /></button>
+            </div>
           </div>
         ))}
       </div>

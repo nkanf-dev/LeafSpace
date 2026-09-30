@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pin, X, ChevronLeft, ChevronRight } from 'lucide-react';
 
 import { useBookStore } from '../../stores/bookStore';
+import { useThumbnailStore } from '../../stores/thumbnailStore';
 import { useHeldStore } from '../../stores/heldStore';
 import { useWindowStore } from '../../stores/windowStore';
 import { thumbnailService } from '../../services/ThumbnailService';
@@ -51,6 +52,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
   const [selectedPage, setSelectedPage] = useState(currentPage);
   const [scrollAnchorPage, setScrollAnchorPage] = useState(currentPage);
   const [zoom, setZoom] = useState(1.0);
+  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
   const [viewMode, setViewMode] = useState<ViewMode>('thumbnails');
   const [pressedDirection, setPressedDirection] = useState<-1 | 1 | null>(null);
   const stripRef = useRef<HTMLDivElement>(null);
@@ -62,6 +64,8 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
   const holdStartTimeRef = useRef<number | null>(null);
   const exitTimelineTimerRef = useRef<number | null>(null);
   const documentUrl = useBookStore((state) => state.documentUrl);
+  const documentId = useBookStore((state) => state.documentId);
+  const hasThumbnailErrors = useThumbnailStore((state) => Object.values(state.entries).some((entry) => entry.status === 'error' && entry.key.startsWith(`${documentId}_`)));
   const heldPages = useHeldStore((state) => state.pages);
   const { holdPage, unholdPage } = useHeldStore.getState();
   const { openInNewWindow } = useWindowStore.getState();
@@ -71,10 +75,17 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
   );
   const sectionMarkers = useMemo(() => buildSectionMarkers(totalPages), [totalPages]);
   const file = useMemo(() => documentUrl ?? null, [documentUrl]);
-  const scaledSlotWidth = SLOT_WIDTH * zoom;
-  const scaledSlotHeight = SLOT_HEIGHT * zoom;
-  const scaledFrameWidth = FRAME_WIDTH * zoom;
-  const scaledFrameHeight = FRAME_HEIGHT * zoom;
+  const layoutScale = Math.min(1, Math.max(0.3, (viewportHeight - 230) / SLOT_HEIGHT));
+  const scaledSlotWidth = SLOT_WIDTH * zoom * layoutScale;
+  const scaledSlotHeight = SLOT_HEIGHT * zoom * layoutScale;
+  const scaledFrameWidth = FRAME_WIDTH * zoom * layoutScale;
+  const scaledFrameHeight = FRAME_HEIGHT * zoom * layoutScale;
+
+  useEffect(() => {
+    const resize = () => setViewportHeight(window.innerHeight);
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
   const renderedRange = useMemo(() => {
     const anchorStart = Math.min(selectedPage, scrollAnchorPage);
     const anchorEnd = Math.max(selectedPage, scrollAnchorPage);
@@ -112,6 +123,11 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     }
 
     cancelStripAnimation();
+
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      strip.scrollLeft = targetLeft;
+      return;
+    }
 
     const startLeft = strip.scrollLeft;
     const delta = targetLeft - startLeft;
@@ -472,8 +488,8 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
       <div className="relative z-10 flex h-dvh w-full flex-col px-3 py-4 sm:px-6 sm:py-6">
         <div className="relative mb-3 shrink-0 text-center sm:mb-5">
           <button type="button" aria-label="关闭速翻" className="absolute right-0 top-0 p-3 text-stone-700" onClick={onClose}><X size={22} /></button>
-          <div className="text-3xl sm:text-[2.8rem] font-extrabold text-stone-900" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>速翻视图</div>
-          <div className="mt-2 hidden text-[0.85rem] text-stone-500 sm:block">
+          <div className="quick-flip-title text-3xl sm:text-[2.8rem] font-extrabold text-stone-900" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>速翻视图</div>
+          <div className="quick-flip-help mt-2 hidden text-[0.85rem] text-stone-500 sm:block">
             <kbd className="border border-[var(--border)] bg-white px-1.5 py-0.5">←</kbd>
             <kbd className="ml-1 border border-[var(--border)] bg-white px-1.5 py-0.5">→</kbd>
             <span className="mx-2">选择</span>•
@@ -625,6 +641,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
             <span aria-live="polite" className="tabular-nums">第 {selectedPage} 页 / {totalPages}</span>
             <button type="button" aria-label="预览下一页" disabled={selectedPage >= totalPages} className="p-2 disabled:opacity-30" onClick={() => stepSelection(1)}><ChevronRight size={22} /></button>
           </div>
+          {hasThumbnailErrors && <div className="mb-3 text-center text-xs text-stone-600">部分预览暂不可用，仍可按页码阅读。<button type="button" className="ml-2 underline underline-offset-4" onClick={() => void thumbnailService.ensureThumbnails(renderedPages, scaledFrameWidth)}>重试预览</button></div>}
           <div className="flex flex-wrap justify-center gap-2">
             <button type="button" className="min-h-11 border border-stone-400 px-4 text-sm text-stone-700" onClick={() => heldPageNumbers.includes(selectedPage) ? unholdPage(selectedPage) : void holdPage(selectedPage)}>{heldPageNumbers.includes(selectedPage) ? '取消夹页' : '夹住此页'}</button>
             <button type="button" className="min-h-11 border border-stone-400 px-4 text-sm text-stone-700" onClick={() => { openInNewWindow(selectedPage); onClose(); }}>打开参考窗</button>
