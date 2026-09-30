@@ -552,11 +552,11 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
                       <CachedThumbnail
                         alt={`第 ${page} 页缩略图`}
                         className="flex items-center justify-center bg-white"
-                        height={Math.round(scaledFrameHeight)}
+                        height={Math.max(1, Math.round(scaledFrameHeight - (isSelected ? 6 : 2)))}
                         pageNumber={page}
                         placeholder={<div className="text-xl font-bold text-stone-300">{page}</div>}
                         priority={isPriority}
-                        width={Math.round(scaledFrameWidth)}
+                        width={Math.max(1, Math.round(scaledFrameWidth - (isSelected ? 6 : 2)))}
                       />
                       {isHeld && (
                         <div className="absolute right-3 top-3 text-[#f5a623] [filter:drop-shadow(0_2px_4px_rgba(0,0,0,0.2))]">
