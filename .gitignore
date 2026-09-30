@@ -29,3 +29,8 @@ docs
 *.pdf
 PRD.md
 TED.md
+!src/tests/fixtures/*.pdf
+
+# Browser test artifacts
+playwright-report/
+test-results/

@@ -23,6 +23,7 @@ const initialState = {
 
 function clampPage(pageNumber: number): number {
   const totalPages = bookStore.getState().totalPages;
+  if (!Number.isFinite(pageNumber)) return 1;
 
   if (totalPages <= 0) {
     return Math.max(1, Math.round(pageNumber));

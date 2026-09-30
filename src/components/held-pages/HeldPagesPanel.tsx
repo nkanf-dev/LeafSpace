@@ -11,85 +11,34 @@ interface Props {
 
 export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onRemovePage }) => {
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
-
-  const renderPageItem = (page: HeldPage) => {
-    const isCard = viewMode === 'card';
-
-    return (
-      <div
-        key={page.id}
-        className={isCard
-          ? `mx-4 my-3 flex cursor-pointer overflow-hidden border bg-white shadow-[0_2px_8px_rgba(0,0,0,0.02)] ${page.isOpen ? 'border-l-4 border-l-stone-900 border-t-[var(--border)] border-r-[var(--border)] border-b-[var(--border)]' : 'border-[var(--border)] hover:bg-[#fbfaf8]'}`
-          : `flex cursor-pointer items-center border-b border-[var(--border)] px-4 py-2 hover:bg-[#fbfaf8] ${page.isOpen ? 'border-l-4 border-l-stone-900 bg-[#fbfaf8]' : ''}`}
-        onClick={() => onPageClick(page)}
-      >
-        {isCard && (
-          <div className="flex w-[60px] min-h-[80px] shrink-0 items-center justify-center bg-[#f0ede9]">
-            <CachedThumbnail
-              alt={`第 ${page.pageNumber} 页缩略图`}
-              height={80}
-              pageNumber={page.pageNumber}
-              placeholder={<div className="text-xs font-bold text-stone-300">{page.pageNumber}</div>}
-              priority={true}
-              width={60}
-            />
-          </div>
-        )}
-
-        {!isCard && <div className="mr-3 text-sm font-bold text-stone-500">P.{page.pageNumber}</div>}
-
-        <div className={`min-w-0 flex-1 ${isCard ? 'p-3' : 'py-1'}`}>
-          <div className="mb-0.5 flex items-center justify-between gap-2">
-            <span className="text-[0.65rem] font-extrabold text-stone-500">P.{page.pageNumber}</span>
-            <button
-              type="button"
-              className="px-1 text-stone-400 transition hover:text-red-600"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRemovePage(page.id);
-              }}
-              title="移除"
-            >
-              <X size={14} />
-            </button>
-          </div>
-          <div className="truncate text-[0.85rem] font-semibold text-stone-900">{page.customName || page.defaultName}</div>
-          {page.note && <div className="mt-1 truncate text-[0.7rem] italic text-stone-500">{page.note}</div>}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div className="flex h-full flex-col bg-[var(--surface)]">
-      <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4 text-[0.8rem] font-extrabold text-stone-500" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>
-        <span>夹住的页面 ({pages.length})</span>
-        <div className="flex bg-[#f0ede9] p-[2px]">
-          <button
-            type="button"
-            className={`border-0 px-2 py-0.5 ${viewMode === 'card' ? 'bg-white shadow-sm' : 'opacity-50 hover:bg-black/5 hover:opacity-75'}`}
-            onClick={() => setViewMode('card')}
-            title="卡片视图"
-          >
-            <LayoutGrid size={14} />
-          </button>
-          <button
-            type="button"
-            className={`border-0 px-2 py-0.5 ${viewMode === 'list' ? 'bg-white shadow-sm' : 'opacity-50 hover:bg-black/5 hover:opacity-75'}`}
-            onClick={() => setViewMode('list')}
-            title="列表视图"
-          >
-            <List size={14} />
-          </button>
+      <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4 text-sm font-semibold text-stone-600">
+        <h2>夹住的页面 ({pages.length})</h2>
+        <div className="flex bg-[#f0ede9] p-0.5">
+          <button type="button" aria-label="卡片视图" title="卡片视图" aria-pressed={viewMode === 'card'} className={`p-2 ${viewMode === 'card' ? 'bg-white shadow-sm' : 'opacity-60'}`} onClick={() => setViewMode('card')}><LayoutGrid size={15} /></button>
+          <button type="button" aria-label="列表视图" title="列表视图" aria-pressed={viewMode === 'list'} className={`p-2 ${viewMode === 'list' ? 'bg-white shadow-sm' : 'opacity-60'}`} onClick={() => setViewMode('list')}><List size={15} /></button>
         </div>
       </div>
-
       <div className="min-h-0 flex-1 overflow-y-auto">
         {pages.length === 0 ? (
-          <div className="pt-24 text-center text-stone-500">✧ 卷轴空空如也</div>
-        ) : (
-          pages.map((page) => renderPageItem(page))
-        )}
+          <div className="px-6 py-14 text-center text-sm leading-6 text-stone-500">
+            <p className="mb-2 text-lg text-stone-700">留住值得对照的一页</p>
+            <p>在阅读区按 ↑，或点击「夹住此页」。再点击夹页，即可打开参考窗口。</p>
+          </div>
+        ) : pages.map((page) => (
+          <div key={page.id} className={`relative mx-3 my-3 flex overflow-hidden border bg-white ${page.isOpen ? 'border-stone-700' : 'border-[var(--border)]'}`}>
+            <button type="button" aria-label={`打开第 ${page.pageNumber} 页参考窗口`} onClick={() => onPageClick(page)} className="flex min-w-0 flex-1 items-center text-left transition hover:bg-stone-50">
+              {viewMode === 'card' && <CachedThumbnail alt={`第 ${page.pageNumber} 页缩略图`} className="shrink-0 bg-[#f0ede9]" height={80} width={60} pageNumber={page.pageNumber} priority placeholder={<span className="p-3 text-stone-400">{page.pageNumber}</span>} />}
+              <span className="min-w-0 flex-1 p-3">
+                <span className="block text-xs text-stone-500">第 {page.pageNumber} 页{page.isOpen ? ' · 已打开' : ''}</span>
+                <span className="mt-1 block truncate text-sm font-semibold text-stone-900">{page.customName || page.defaultName}</span>
+                {page.note && <span className="mt-1 block truncate text-xs text-stone-500">{page.note}</span>}
+              </span>
+            </button>
+            <button type="button" className="self-start p-3 text-stone-400 hover:text-red-700" onClick={() => onRemovePage(page.id)} aria-label={`移除第 ${page.pageNumber} 页夹页`} title="移除"><X size={16} /></button>
+          </div>
+        ))}
       </div>
     </div>
   );

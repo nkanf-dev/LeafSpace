@@ -1,77 +1,172 @@
-// @ts-nocheck
+import { test, expect, importBook, reader, expectMainPage, navigateTo, quickFlip, openQuickFlip, holdCurrentPage } from './helpers';
 
-// @ts-nocheck
+test.beforeEach(async ({ page }) => {
+  await page.goto('/');
+  await importBook(page);
+});
 
-import { test, expect } from '@playwright/test';
-import path from 'path';
-import fs from 'fs';
-
-// A truly valid minimal PDF file
-const MINIMAL_PDF = Buffer.from(
-  '255044462d312e310a312030206f626a0a3c3c2f547970652f436174616c6f672f50616765732032203020523e3e0a656e646f626a0a322030206f626a0a3c3c2f547970652f436174616c6f672f436f756e7420312f4b6964735b33203020525d3e3e0a656e646f626a0a332030206f626a0a3c3c2f547970652f506167652f506172656e742032203020522f5265736f75726365733c3c3e3e2f4d65646961426f785b30203020363132203739325d3e3e0a656e646f626a0a747261696c65720a3c3c2f53697a6520342f526f6f742031203020523e3e0a2525454f46',
-  'hex'
-);
-
-test.describe('LeafSpace - Real World Business Workflow', () => {
-  const testPdfPath = path.join(process.cwd(), 'real-world-test.pdf');
-
-  test.beforeAll(() => {
-    fs.writeFileSync(testPdfPath, MINIMAL_PDF);
+test.describe('Reader navigation and zoom', () => {
+  test('arrow navigation and timeline respect both document boundaries', async ({ page }) => {
+    await reader(page).focus();
+    await page.keyboard.press('ArrowLeft');
+    await expectMainPage(page, 1);
+    await page.keyboard.press('ArrowRight');
+    await expectMainPage(page, 2);
+    const timeline = page.getByRole('slider', { name: '跳转到页码' });
+    await timeline.focus();
+    await page.keyboard.press('End');
+    await expectMainPage(page, 12);
+    await reader(page).focus();
+    await page.keyboard.press('ArrowRight');
+    await expectMainPage(page, 12);
+    await timeline.focus();
+    await page.keyboard.press('Home');
+    await expectMainPage(page, 1);
   });
 
-  test.afterAll(() => {
-    if (fs.existsSync(testPdfPath)) fs.unlinkSync(testPdfPath);
+  test('named zoom controls and selection modes work with the keyboard', async ({ page }) => {
+    const zoomIn = page.getByRole('button', { name: '放大', exact: true });
+    await zoomIn.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByText('120%', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '缩小', exact: true }).click();
+    await expect(page.getByText('96%', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '选择文字', exact: true }).click();
+    await expect(page.getByRole('button', { name: '选择文字', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: '拖动页面', exact: true }).click();
+    await expect(page.getByRole('button', { name: '拖动页面', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expectMainPage(page, 1);
   });
 
-  test('full cycle: load pdf -> hold page -> verify spatial layout -> check quick flip thumbnails', async ({ page }) => {
-    // 1. 进入欢迎页
-    await page.goto('/');
-    await expect(page.locator('.welcome-screen')).toBeVisible();
+  test('Space on an import button retains native activation', async ({ page }) => {
+    await page.getByRole('button', { name: '导入书籍', exact: true }).focus();
+    const fileChooser = page.waitForEvent('filechooser');
+    await page.keyboard.press('Space');
+    await fileChooser;
+    await expect(quickFlip(page)).toHaveCount(0);
+    await expectMainPage(page, 1);
+  });
+});
 
-    // 2. 真实文件上传
-    const [fileChooser] = await Promise.all([
-      page.waitForEvent('filechooser'),
-      page.getByRole('button', { name: 'Select PDF to Start' }).click(),
-    ]);
-    await fileChooser.setFiles(testPdfPath);
-
-    // 3. 验证加载成功 (匹配真实 UI ID 输出)
-    await expect(page.locator('.document-info')).toContainText('ID:', { timeout: 15000 });
-    
-    // 验证主窗 Canvas 已渲染且可见
-    const mainCanvas = page.locator('.reader-window-container.main canvas');
-    await expect(mainCanvas).toBeVisible();
-
-    // 4. 执行夹页 (Hold Current)
-    await page.getByRole('button', { name: 'Hold Current' }).click();
-    
-    // 验证侧边栏卡片出现，并且有缩略图占位符或真实图片
-    const heldCard = page.locator('.held-page-card');
-    await expect(heldCard).toBeVisible();
-    await expect(heldCard.locator('.page-num')).toContainText('P.1');
-
-    // 5. 点击卡片开启对比窗口
-    await heldCard.click();
-    
-    // 验证空间布局：现在应该有两个窗口容器
-    const windows = page.locator('.reader-window-container');
-    await expect(windows).toHaveCount(2);
-    
-    // 验证参考窗标题
-    await expect(page.locator('.reader-window-container').last().locator('.window-title')).toContainText('Page 1');
-
-    // 6. 验证速翻胶带与缩略图加载
-    await page.keyboard.press(' ');
-    const quickFlip = page.locator('.quick-flip-overlay');
-    await expect(quickFlip).toBeVisible();
-    
-    // 验证速翻项中是否存在页面元素
-    const flipItem = page.locator('.quick-flip-item.active');
-    await expect(flipItem).toBeVisible();
-    await expect(flipItem.locator('.page-label')).toHaveText('1');
-
-    // 验证键盘关闭
+test.describe('Quick Flip selection and keyboard isolation', () => {
+  test('Escape cancels selection without moving the reader and returns focus', async ({ page }) => {
+    await navigateTo(page, 3);
+    await openQuickFlip(page);
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await expect(quickFlip(page).getByRole('button', { name: '选择第 5 页', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('header')).toContainText('第 3 页');
     await page.keyboard.press('Escape');
-    await expect(quickFlip).not.toBeVisible();
+    await expect(quickFlip(page)).toHaveCount(0);
+    await expectMainPage(page, 3);
+    await expect(reader(page)).toBeFocused();
+  });
+
+  test('Enter commits a selected page and repeated openings reset to the actual reader page', async ({ page }) => {
+    for (const target of [4, 8, 2]) {
+      await openQuickFlip(page);
+      await quickFlip(page).getByRole('button', { name: `选择第 ${target} 页`, exact: true }).click();
+      await page.keyboard.press('Enter');
+      await expect(quickFlip(page)).toHaveCount(0);
+      await expectMainPage(page, target);
+      await openQuickFlip(page);
+      await expect(quickFlip(page).getByRole('button', { name: `选择第 ${target} 页`, exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await page.keyboard.press('Escape');
+    }
+  });
+
+  test('holding an arrow enters accelerated timeline, then settles without committing', async ({ page }) => {
+    await openQuickFlip(page);
+    await page.keyboard.down('ArrowRight');
+    try {
+      await expect(quickFlip(page).getByText('时间轴视图', { exact: true })).toBeVisible();
+    } finally {
+      await page.keyboard.up('ArrowRight');
+    }
+    await expect(quickFlip(page).getByText('时间轴视图', { exact: true })).toHaveCount(0);
+    await expect(quickFlip(page).getByRole('button', { pressed: true })).toHaveCount(1);
+    await expect(page.locator('header')).toContainText('第 1 页');
+    await page.keyboard.press('Escape');
+    await expectMainPage(page, 1);
+  });
+
+  test('a repeated Space keydown does not reopen or dismiss the overlay', async ({ page }) => {
+    await reader(page).focus();
+    await page.keyboard.down('Space');
+    await expect(quickFlip(page)).toBeVisible();
+    await page.keyboard.down('Space'); // Playwright marks successive keydowns as repeat.
+    await expect(quickFlip(page)).toBeVisible();
+    await page.keyboard.up('Space');
+    await page.keyboard.press('Space');
+    await expect(quickFlip(page)).toHaveCount(0);
+  });
+
+  test('modal focus stays within Quick Flip while tabbing', async ({ page }) => {
+    await openQuickFlip(page);
+    for (let index = 0; index < 18; index++) {
+      await page.keyboard.press(index % 3 === 0 ? 'Shift+Tab' : 'Tab');
+      expect(await quickFlip(page).evaluate((element) => element.contains(document.activeElement))).toBe(true);
+    }
+    await page.keyboard.press('Escape');
+    await expect(reader(page)).toBeFocused();
+  });
+
+  test('can hold and release a preview page without changing the reading position', async ({ page }) => {
+    await openQuickFlip(page);
+    await quickFlip(page).getByRole('button', { name: '选择第 5 页', exact: true }).click();
+    await page.keyboard.press('ArrowUp');
+    await expect(page.getByRole('button', { name: '打开第 5 页参考窗口', exact: true, includeHidden: true })).toBeAttached();
+    await page.keyboard.press('ArrowDown');
+    await expect(page.getByRole('button', { name: '打开第 5 页参考窗口', exact: true, includeHidden: true })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expectMainPage(page, 1);
+  });
+});
+
+test.describe('Held pages and comparison windows', () => {
+  test('holding twice keeps one reference and keyboard activation opens a closable window', async ({ page }) => {
+    await navigateTo(page, 3);
+    await holdCurrentPage(page, 3);
+    await page.keyboard.press('ArrowUp');
+    const held = page.getByRole('button', { name: '打开第 3 页参考窗口', exact: true });
+    await expect(held).toHaveCount(1);
+    await held.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-floating-window]')).toHaveCount(1);
+    await expect(page.getByRole('region', { name: '参考阅读区，第 3 页', exact: true }).locator('canvas')).toBeVisible();
+    await page.locator('[data-floating-window]').getByRole('button', { name: '关闭', exact: true }).click();
+    await expect(page.locator('[data-floating-window]')).toHaveCount(0);
+    await expect(held).toBeVisible();
+    await expectMainPage(page, 3);
+  });
+
+  test('a reference can navigate independently, dock, swap, float, and close', async ({ page }) => {
+    await navigateTo(page, 2);
+    await holdCurrentPage(page, 2);
+    await page.getByRole('button', { name: '打开第 2 页参考窗口', exact: true }).click();
+    await page.getByRole('region', { name: '参考阅读区，第 2 页', exact: true }).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.getByRole('region', { name: '参考阅读区，第 3 页', exact: true }).locator('canvas')).toBeVisible();
+    await expectMainPage(page, 2);
+    await page.locator('[data-floating-window]').getByRole('button', { name: '吸附', exact: true }).click();
+    await expect(page.getByRole('separator', { name: '调整主窗口与分栏宽度' })).toBeVisible();
+    await page.getByRole('button', { name: '交换', exact: true }).click();
+    await expectMainPage(page, 3);
+    await expect(page.getByRole('region', { name: '参考阅读区，第 2 页', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '浮动', exact: true }).click();
+    await expect(page.locator('[data-floating-window]')).toHaveCount(1);
+    await page.locator('[data-floating-window]').getByRole('button', { name: '关闭', exact: true }).click();
+    await expect(page.locator('[data-floating-window]')).toHaveCount(0);
+    await expectMainPage(page, 3);
+  });
+
+  test('removing a held page also removes its open comparison', async ({ page }) => {
+    await holdCurrentPage(page, 1);
+    await page.getByRole('button', { name: '打开第 1 页参考窗口', exact: true }).click();
+    await expect(page.locator('[data-floating-window]')).toHaveCount(1);
+    await page.getByRole('button', { name: '移除第 1 页夹页', exact: true }).click();
+    await expect(page.locator('[data-floating-window]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '打开第 1 页参考窗口', exact: true })).toHaveCount(0);
+    await expectMainPage(page, 1);
   });
 });

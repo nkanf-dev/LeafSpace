@@ -1,4 +1,5 @@
-import React, { useMemo } from 'react';
+import React from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface Props {
   currentPage: number;
@@ -7,60 +8,21 @@ interface Props {
   markers?: number[];
 }
 
-export const TimelineBar: React.FC<Props> = ({ 
-  currentPage, 
-  totalPages, 
-  onPageClick, 
-  markers = [] 
-}) => {
+export const TimelineBar: React.FC<Props> = ({ currentPage, totalPages, onPageClick, markers = [] }) => {
   const safeTotal = Math.max(1, totalPages);
-  const progress = (currentPage / safeTotal) * 100;
-
-  const markerElements = useMemo(() => {
-    return markers.map(m => (
-      <button
-        type="button"
-        key={m}
-        className="absolute top-1/2 z-10 h-3 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-stone-800/50 transition hover:h-4 hover:bg-stone-900"
-        style={{ left: `${(m / safeTotal) * 100}%` }}
-        onClick={(e) => {
-          e.stopPropagation();
-          onPageClick(m);
-        }}
-      />
-    ));
-  }, [markers, safeTotal, onPageClick]);
-
-  const handleTrackClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const clickedPage = Math.max(1, Math.ceil((x / rect.width) * safeTotal));
-    onPageClick(clickedPage);
-  };
-
+  const progress = ((currentPage - 1) / Math.max(1, safeTotal - 1)) * 100;
   return (
-    <div className="flex h-full items-center gap-8 bg-[var(--surface)] px-8">
-      <div className="flex min-w-[100px] items-baseline gap-1">
-        <div className="text-[1.4rem] font-extrabold text-stone-900" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>{currentPage}</div>
-        <div className="text-[0.8rem] text-stone-500">/ {safeTotal}</div>
+    <nav aria-label="阅读进度" className="flex h-full min-w-0 items-center gap-3 bg-[var(--surface)] px-3 sm:gap-6 sm:px-6">
+      <button type="button" aria-label="上一页" disabled={currentPage <= 1 || !totalPages} onClick={() => onPageClick(currentPage - 1)} className="p-2 text-stone-700 disabled:opacity-30"><ChevronLeft size={20} /></button>
+      <div className="shrink-0 text-sm tabular-nums text-stone-600"><strong className="text-xl text-stone-900">{totalPages ? currentPage : '—'}</strong> / {totalPages || '—'}</div>
+      <div className="relative flex h-10 min-w-0 flex-1 items-center">
+        <div aria-hidden="true" className="absolute inset-x-0 h-0.5 bg-[var(--border)]" />
+        <div aria-hidden="true" className="absolute left-0 h-0.5 bg-stone-800" style={{ width: `${progress}%` }} />
+        <input type="range" min={1} max={safeTotal} value={currentPage} disabled={!totalPages} aria-label="跳转到页码" aria-valuetext={`第 ${currentPage} 页，共 ${totalPages} 页`} onChange={(event) => onPageClick(Number(event.target.value))} className="page-range relative z-10 w-full" />
+        {markers.map((page) => <button key={page} type="button" aria-label={`跳转到夹页 ${page}`} title={`第 ${page} 页夹页`} onClick={() => onPageClick(page)} className="absolute -bottom-1 z-20 h-4 w-4 -translate-x-1/2 text-center text-xs text-amber-700" style={{ left: `${((page - 1) / Math.max(1, safeTotal - 1)) * 100}%` }}>◆</button>)}
       </div>
-      
-      <div className="flex h-10 flex-1 items-center">
-        <div className="group relative flex h-5 w-full cursor-pointer items-center" onClick={handleTrackClick}>
-          <div className="absolute inset-x-0 h-[2px] bg-[var(--border)]" />
-          <div className="absolute left-0 h-[2px] bg-stone-900" style={{ width: `${progress}%` }} />
-          {markerElements}
-          <div className="absolute top-1/2 z-20 h-3 w-3 -translate-x-1/2 -translate-y-1/2 border-2 border-stone-900 bg-[var(--surface)]" style={{ left: `${progress}%` }}>
-            <div className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 bg-stone-900 px-1.5 py-0.5 text-[0.65rem] font-bold text-white opacity-0 transition group-hover:opacity-100">
-              {progress.toFixed(0)}%
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="min-w-[200px] text-right text-[0.75rem] italic text-stone-500">
-        点击进度条跳转 • Space 开启速翻
-      </div>
-    </div>
+      <button type="button" aria-label="下一页" disabled={currentPage >= totalPages || !totalPages} onClick={() => onPageClick(currentPage + 1)} className="p-2 text-stone-700 disabled:opacity-30"><ChevronRight size={20} /></button>
+      <span className="hidden text-xs text-stone-500 xl:block">← → 翻页 · ↑ 夹页 · Space 速翻</span>
+    </nav>
   );
 };

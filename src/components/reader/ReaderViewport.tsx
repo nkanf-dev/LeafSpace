@@ -79,7 +79,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   const updateScale = useCallback((updater: number | ((value: number) => number)) => {
     const currentScale = isMain ? globalScale : scale;
     const nextScale = typeof updater === 'function' ? updater(currentScale) : updater;
-    const clampedScale = Math.min(8, Math.max(0.1, nextScale));
+    const clampedScale = Math.min(4, Math.max(0.1, nextScale));
 
     if (isMain) {
       setGlobalScale(clampedScale);
@@ -214,7 +214,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     if (!el) return;
 
     const onWheel = (e: WheelEvent) => {
-      if (mode === 'grab') {
+      if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         cancelPanAnimation();
         syncPanTargetToContainer();
@@ -237,9 +237,9 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
 
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [cancelPanAnimation, mode, scale, syncPanTargetToContainer]);
+  }, [cancelPanAnimation, scale, syncPanTargetToContainer, updateScale]);
 
-  const animatePanToTarget = useCallback(() => {
+  const animatePanToTarget = useCallback(function animate() {
     const container = containerRef.current;
     if (!container) {
       panAnimationFrame.current = null;
@@ -258,7 +258,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
 
     container.scrollLeft += deltaX * 0.22;
     container.scrollTop += deltaY * 0.22;
-    panAnimationFrame.current = window.requestAnimationFrame(animatePanToTarget);
+    panAnimationFrame.current = window.requestAnimationFrame(animate);
   }, []);
 
   const ensurePanAnimation = useCallback(() => {
@@ -270,7 +270,8 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   }, [animatePanToTarget]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (mode !== 'grab' || !containerRef.current) return;
+    if (e.button !== 0 || mode !== 'grab' || !containerRef.current) return;
+    containerRef.current.focus();
     e.preventDefault();
     cancelPanAnimation();
     setIsPanning(true);
@@ -350,7 +351,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
       return;
     }
 
-    updateWindow(windowId, { pageNumber: clampedPage, title: `Page ${clampedPage}` });
+    updateWindow(windowId, { pageNumber: clampedPage, title: `第 ${clampedPage} 页` });
   }, [isMain, setCurrentPage, totalPages, updateWindow, windowId]);
 
   const handleViewportFocus = useCallback(() => {
@@ -389,13 +390,13 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--surface)]">
-      <div className="flex h-11 items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-4">
+      <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2 py-1 sm:px-4">
         <div className="flex items-center gap-3">
           <div className="flex bg-[#f0ede9] p-[2px]">
-            <button className={modeButtonClasses(mode === 'pointer')} onClick={() => handleModeChange('pointer')} title="滚动模式">
+            <button className={modeButtonClasses(mode === 'pointer')} onClick={() => handleModeChange('pointer')} title="选择文字" aria-label="选择文字" aria-pressed={mode === 'pointer'}>
               <MousePointer2 size={16} strokeWidth={2.5} />
             </button>
-            <button className={modeButtonClasses(mode === 'grab')} onClick={() => handleModeChange('grab')} title="抓手模式">
+            <button className={modeButtonClasses(mode === 'grab')} onClick={() => handleModeChange('grab')} title="拖动页面" aria-label="拖动页面" aria-pressed={mode === 'grab'}>
               <Hand size={16} strokeWidth={2.5} />
             </button>
           </div>
@@ -405,15 +406,17 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
         </div>
 
         <div className="flex items-center gap-2 text-sm text-stone-500">
-          <button className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9]" onClick={() => updateScale((value) => value * 0.8)}><ZoomOut size={14} /></button>
+          <button aria-label="缩小" title="缩小" disabled={scale <= 0.1} className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9] disabled:opacity-40" onClick={() => updateScale((value) => value * 0.8)}><ZoomOut size={14} /></button>
           <span className="text-[0.75rem] text-stone-700">{Math.round(scale * 100)}%</span>
-          <button className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9]" onClick={() => updateScale((value) => value * 1.2)}><ZoomIn size={14} /></button>
+          <button aria-label="放大" title="放大" disabled={scale >= 4} className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9] disabled:opacity-40" onClick={() => updateScale((value) => value * 1.2)}><ZoomIn size={14} /></button>
         </div>
       </div>
 
       <div 
         ref={containerRef}
         tabIndex={0}
+        role="region"
+        aria-label={isMain ? '主阅读区' : `参考阅读区，第 ${activePage} 页`}
         className={`flex min-h-0 min-w-0 flex-1 overflow-auto bg-[#edece9] ${mode === 'grab' ? 'select-none' : 'select-text'}`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -423,23 +426,26 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
         onMouseDownCapture={handleViewportFocus}
         onKeyDown={handleViewportKeyDown}
         onScroll={handleScroll}
-        style={{ cursor: mode === 'grab' ? (isPanning ? 'grabbing' : 'grab') : 'default', touchAction: mode === 'grab' ? 'none' : 'auto' }}
+        style={{ cursor: mode === 'grab' ? (isPanning ? 'grabbing' : 'grab') : 'default', touchAction: 'pan-x pan-y' }}
       >
         <div
-          className={`flex min-h-full min-w-full px-10 py-[60px] ${shouldCenterHorizontally ? 'justify-center' : 'justify-start'} ${shouldCenterVertically ? 'items-center' : 'items-start'}`}
+          className={`flex min-h-full min-w-full px-4 py-6 sm:px-10 sm:py-[60px] ${shouldCenterHorizontally ? 'justify-center' : 'justify-start'} ${shouldCenterVertically ? 'items-center' : 'items-start'}`}
         >
           <div ref={contentFrameRef} className="w-max shrink-0">
             {file ? (
               <Document
                 file={file}
                 options={options}
-                loading={<div className="mt-24 text-sm italic text-stone-500" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>正在渲染...</div>}
+                error={<div role="alert" className="max-w-xs p-6 text-sm text-red-800">页面暂时无法显示，请重新导入这本 PDF。</div>}
+                loading={<div role="status" className="mt-24 text-sm italic text-stone-500" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>正在渲染...</div>}
               >
                 <Page
                   pageNumber={activePage}
                   scale={scale}
                   className="border border-[#e0ddd5] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.05),0_30px_100px_rgba(0,0,0,0.1)]"
                   renderTextLayer={true}
+                  loading={<div role="status" className="p-6 text-sm text-stone-500">正在渲染页面…</div>}
+                  error={<div role="alert" className="p-6 text-sm text-red-800">这一页无法渲染，请试试其他页面或重新导入。</div>}
                 />
               </Document>
             ) : (

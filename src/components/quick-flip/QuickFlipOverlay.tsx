@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pin } from 'lucide-react';
+import { Pin, X, ChevronLeft, ChevronRight } from 'lucide-react';
 
 import { useBookStore } from '../../stores/bookStore';
 import { useHeldStore } from '../../stores/heldStore';
@@ -203,7 +203,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
       skipNextThumbnailScrollAnimationRef.current = true;
       setViewMode('thumbnails');
     }, ACCELERATION_IDLE_MS);
-  }, [alignStripToPage, clearExitTimelineTimer]);
+  }, [clearExitTimelineTimer]);
 
   const handleWheelInput = useCallback((deltaY: number) => {
     if (viewMode === 'timeline') {
@@ -255,7 +255,16 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     }, 40);
 
     return () => window.clearTimeout(openTimer);
-  }, [cancelStripAnimation, clearExitTimelineTimer, currentPage, isVisible]);
+  }, [alignStripToPage, cancelStripAnimation, clearExitTimelineTimer, currentPage, isVisible]);
+
+  useEffect(() => {
+    if (!isVisible) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    overlayRef.current?.focus();
+    const stopHold = () => { setPressedDirection(null); holdStartTimeRef.current = null; };
+    window.addEventListener('blur', stopHold);
+    return () => { window.removeEventListener('blur', stopHold); previousFocus?.focus(); };
+  }, [isVisible]);
 
   useEffect(() => {
     if (!isVisible || pressedDirection === null) {
@@ -289,13 +298,29 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     if (!isVisible) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.key === 'Tab') {
+        const focusable = Array.from(overlayRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [tabindex="0"]') ?? []);
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && (document.activeElement === first || document.activeElement === overlayRef.current)) {
+          e.preventDefault(); last?.focus();
+        } else if (!e.shiftKey && (document.activeElement === last || document.activeElement === overlayRef.current)) {
+          e.preventDefault(); first?.focus();
+        }
+        return;
+      }
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
         return;
       }
 
+      const interactive = e.target instanceof Element && e.target.closest('button, input, textarea, select, a, [contenteditable="true"]');
+      if (interactive) return;
       if (e.key === ' ') {
+        e.preventDefault();
+        if (!e.repeat) onClose();
         return;
       }
 
@@ -442,12 +467,13 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
   const selectedProgress = ((selectedPage - 1) / Math.max(1, totalPages - 1)) * 100;
 
   return (
-    <div ref={overlayRef} className="fixed inset-0 z-[3000] overflow-hidden" onWheelCapture={handleWheelCapture}>
+    <div ref={overlayRef} role="dialog" aria-modal="true" aria-label="速翻视图" tabIndex={-1} className="fixed inset-0 z-[3000] overflow-hidden" onWheelCapture={handleWheelCapture}>
       <div className="absolute inset-0 bg-[rgba(251,250,248,0.7)] backdrop-blur-[40px]" onClick={onClose} />
-      <div className="relative z-10 flex min-h-screen w-full flex-col px-6 py-6">
-        <div className="mb-5 shrink-0 text-center">
-          <div className="text-[2.8rem] font-extrabold text-stone-900" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>速翻视图</div>
-          <div className="mt-2 text-[0.85rem] text-stone-500">
+      <div className="relative z-10 flex h-dvh w-full flex-col px-3 py-4 sm:px-6 sm:py-6">
+        <div className="relative mb-3 shrink-0 text-center sm:mb-5">
+          <button type="button" aria-label="关闭速翻" className="absolute right-0 top-0 p-3 text-stone-700" onClick={onClose}><X size={22} /></button>
+          <div className="text-3xl sm:text-[2.8rem] font-extrabold text-stone-900" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>速翻视图</div>
+          <div className="mt-2 hidden text-[0.85rem] text-stone-500 sm:block">
             <kbd className="border border-[var(--border)] bg-white px-1.5 py-0.5">←</kbd>
             <kbd className="ml-1 border border-[var(--border)] bg-white px-1.5 py-0.5">→</kbd>
             <span className="mx-2">选择</span>•
@@ -466,13 +492,13 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
         <div className="relative flex min-h-0 flex-1 items-center">
           {viewMode === 'thumbnails' && (
             <div
-              className="quick-flip-strip h-full w-full overflow-x-auto overflow-y-visible"
+              className="quick-flip-strip h-full min-h-0 w-full overflow-x-auto overflow-y-hidden"
               ref={stripRef}
               onWheelCapture={handleWheelCapture}
               style={{ overscrollBehavior: 'contain' }}
             >
               {file && (
-                <div className="flex h-full items-center">
+                <div className="flex h-full items-center" style={{ paddingInline: `max(0px, calc(50vw - ${scaledSlotWidth / 2 + 24}px))` }}>
                   <div aria-hidden="true" style={{ width: leadingSpacerWidth, minWidth: leadingSpacerWidth }} />
                   {renderedPages.map((page) => {
                 const isSelected = page === selectedPage;
@@ -484,6 +510,8 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
                     key={page}
                     type="button"
                     data-page={page}
+                    aria-label={`选择第 ${page} 页`}
+                    aria-pressed={isSelected}
                     className={`p-${page} flex shrink-0 cursor-pointer flex-col items-center justify-center gap-6 border-0 bg-transparent px-2 transition-opacity duration-200 ${isSelected ? 'opacity-100' : 'opacity-35 hover:opacity-60'}`}
                     style={{ width: scaledSlotWidth, minWidth: scaledSlotWidth, height: scaledSlotHeight }}
                     onClick={(e) => {
@@ -493,6 +521,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
                       }
                       setSelectedPage(page);
                       latestSelectedPageRef.current = page;
+                      overlayRef.current?.focus();
                     }}
                     onDoubleClick={() => { onPageChange(page); onClose(); }}
                   >
@@ -589,6 +618,18 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
               </div>
             </div>
           )}
+        </div>
+        <div className="relative z-30 mt-3 shrink-0 border-t border-[var(--border)] bg-[var(--surface)]/95 px-3 py-3">
+          <div className="mb-3 flex items-center justify-center gap-5 text-sm text-stone-600">
+            <button type="button" aria-label="预览上一页" disabled={selectedPage <= 1} className="p-2 disabled:opacity-30" onClick={() => stepSelection(-1)}><ChevronLeft size={22} /></button>
+            <span aria-live="polite" className="tabular-nums">第 {selectedPage} 页 / {totalPages}</span>
+            <button type="button" aria-label="预览下一页" disabled={selectedPage >= totalPages} className="p-2 disabled:opacity-30" onClick={() => stepSelection(1)}><ChevronRight size={22} /></button>
+          </div>
+          <div className="flex flex-wrap justify-center gap-2">
+            <button type="button" className="min-h-11 border border-stone-400 px-4 text-sm text-stone-700" onClick={() => heldPageNumbers.includes(selectedPage) ? unholdPage(selectedPage) : void holdPage(selectedPage)}>{heldPageNumbers.includes(selectedPage) ? '取消夹页' : '夹住此页'}</button>
+            <button type="button" className="min-h-11 border border-stone-400 px-4 text-sm text-stone-700" onClick={() => { openInNewWindow(selectedPage); onClose(); }}>打开参考窗</button>
+            <button type="button" className="min-h-11 border border-stone-900 bg-stone-900 px-5 text-sm font-semibold text-white" onClick={() => { onPageChange(selectedPage); onClose(); }}>阅读此页</button>
+          </div>
         </div>
       </div>
     </div>
