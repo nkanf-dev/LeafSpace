@@ -21,6 +21,9 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+      - run: npm run check:deploy
+        env:
+          WRANGLER_SEND_METRICS: false
       - run: npm run test:unit
       - run: npm run test:ui
       - run: npx playwright install --with-deps chromium

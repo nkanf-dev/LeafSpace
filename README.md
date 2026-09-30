@@ -54,7 +54,7 @@ LeafSpace 的设计重点不是增加尽可能多的功能点，而是让这些�
 
 ### Requirements
 
-- Node.js 20+
+- Node.js 22.12+
 - npm 10+
 
 ### Install
