@@ -528,7 +528,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
                     data-page={page}
                     aria-label={`选择第 ${page} 页`}
                     aria-pressed={isSelected}
-                    className={`p-${page} flex shrink-0 cursor-pointer flex-col items-center justify-center gap-6 border-0 bg-transparent px-2 transition-opacity duration-200 ${isSelected ? 'opacity-100' : 'opacity-35 hover:opacity-60'}`}
+                    className={`quick-flip-card p-${page} flex shrink-0 cursor-pointer flex-col items-center justify-center gap-6 border-0 bg-transparent px-2 transition-opacity duration-200 ${isSelected ? 'opacity-100' : 'opacity-35 hover:opacity-60'}`}
                     style={{ width: scaledSlotWidth, minWidth: scaledSlotWidth, height: scaledSlotHeight }}
                     onClick={(e) => {
                       if (e.shiftKey) {
@@ -542,10 +542,10 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
                     onDoubleClick={() => { onPageChange(page); onClose(); }}
                   >
                     <div
-                      className={`relative flex items-center justify-center overflow-hidden border bg-white transition-transform duration-200 ${isSelected ? 'translate-y-[-15px] border-[3px] border-stone-900' : isHeld ? 'border-[#f5a623]' : 'border-[var(--border)]'}`}
+                      className={`relative flex items-center justify-center overflow-hidden border bg-white transition-transform duration-200 ${isSelected ? 'border-[3px] border-stone-900' : isHeld ? 'border-[#f5a623]' : 'border-[var(--border)]'}`}
                       style={{
                         height: scaledFrameHeight,
-                        transform: `scale(${isSelected ? 1.16 : 0.86})`,
+                        transform: `scale(${isSelected ? (viewportHeight < 600 ? 1 : 1.16) : 0.86})`,
                         width: scaledFrameWidth,
                       }}
                     >

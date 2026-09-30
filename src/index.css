@@ -131,4 +131,5 @@ button:disabled { cursor: not-allowed; }
 @media (max-height: 600px) {
   .quick-flip-help { display: none; }
   .quick-flip-title { font-size: 1.5rem; }
+  .quick-flip-card { gap: 0.5rem; }
 }
