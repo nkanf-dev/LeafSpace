@@ -1,3 +1,4 @@
+import { useLayoutEffect } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuickFlipOverlay } from '../../components/quick-flip/QuickFlipOverlay';
@@ -14,8 +15,12 @@ vi.mock('../../services/ThumbnailService', () => ({
     getThumbnailKey: (page: number) => `test_${page}_240`,
   },
 }));
+const lifecycle = vi.hoisted(() => ({ onThumbnailUnmount: null as (() => void) | null }));
 vi.mock('../../components/thumbnails/CachedThumbnail', () => ({
-  CachedThumbnail: ({ alt }: { alt: string }) => <div role="img" aria-label={alt} />,
+  CachedThumbnail: ({ alt }: { alt: string }) => {
+    useLayoutEffect(() => () => { lifecycle.onThumbnailUnmount?.(); }, []);
+    return <div role="img" aria-label={alt} />;
+  },
 }));
 
 function props(overrides = {}) {
@@ -34,6 +39,7 @@ function pageButton(page: number) {
 
 describe('QuickFlipOverlay', () => {
   beforeEach(() => {
+    lifecycle.onThumbnailUnmount = null;
     vi.useFakeTimers();
     thumbnailStore.getState().reset();
     vi.mocked(thumbnailService.ensureThumbnails).mockClear();
@@ -143,6 +149,18 @@ describe('QuickFlipOverlay', () => {
     expect(callbacks.onPageChange).not.toHaveBeenCalled();
     press('Enter');
     expect(callbacks.onPageChange.mock.calls[0][0]).toBeGreaterThan(11);
+  });
+
+  it('settles when key release occurs during timeline commit before passive hold effects', () => {
+    render(<QuickFlipOverlay {...props()} />);
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    lifecycle.onThumbnailUnmount = () => {
+      lifecycle.onThumbnailUnmount = null;
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    };
+    act(() => vi.advanceTimersByTime(240));
+    act(() => vi.advanceTimersByTime(500));
+    expect(screen.queryByText('时间轴视图')).not.toBeInTheDocument();
   });
 
   it('removes listeners and pending acceleration work on unmount', () => {
