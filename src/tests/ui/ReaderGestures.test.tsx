@@ -63,6 +63,20 @@ describe('reader touch transactions', () => {
     event('touchmove', [touch(1, 50), touch(2, 250)]); event('touchend', []);
     expect(onZoom).toHaveBeenCalledTimes(1);
   });
+  it('keeps surviving contacts blocked across inert dismissal', () => {
+    const { event, touch, onZoom, region } = setup();
+    event('touchstart', [touch(1, 100), touch(2, 200)]);
+    event('touchmove', [touch(1, 50), touch(2, 250)]);
+    region.setAttribute('inert', '');
+    event('touchend', [touch(1, 50)], [touch(2, 250)]);
+    region.removeAttribute('inert');
+    event('touchstart', [touch(1, 50), touch(3, 150)]);
+    event('touchmove', [touch(1, 25), touch(3, 225)]); event('touchend', []);
+    expect(onZoom).not.toHaveBeenCalled();
+    event('touchstart', [touch(1, 100), touch(2, 200)]);
+    event('touchmove', [touch(1, 50), touch(2, 250)]); event('touchend', []);
+    expect(onZoom).toHaveBeenCalledTimes(1);
+  });
   it('rejects contacts from a different pane', () => {
     const { event, touch, onZoom } = setup();
     event('touchstart', [touch(1, 100), touch(2, 200, 200, document.body)]);

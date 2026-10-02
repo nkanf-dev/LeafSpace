@@ -46,7 +46,10 @@ export function useReaderGestures(options: Options) {
     cancelRef.current = interrupt;
     const unavailable = () => !!container.closest('[inert]') || container.clientWidth === 0 || container.clientHeight === 0;
     const start = (event: TouchEvent) => {
-      if (unavailable()) { cancel(); return; }
+      if (unavailable()) {
+        if (event.touches.length) interrupt(); else cancel();
+        return;
+      }
       const touches = Array.from(event.touches);
       // A fresh single-contact start also recovers after an OS interruption that
       // never delivered its final touchend. Surviving multi-touch stays blocked.
@@ -101,7 +104,10 @@ export function useReaderGestures(options: Options) {
       }
     };
     const end = (event: TouchEvent) => {
-      if (unavailable()) { cancel(); return; }
+      if (unavailable()) {
+        if (event.touches.length) interrupt(); else cancel();
+        return;
+      }
       const completed = gesture;
       if (completed?.kind === 'pinch') {
         clearPreview();
