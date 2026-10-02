@@ -26,12 +26,34 @@ jobs:
           WRANGLER_SEND_METRICS: false
       - run: npm run test:unit
       - run: npm run test:ui
-      - run: npx playwright install --with-deps chromium firefox webkit
-      - run: npm run test:e2e
+  browser-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps ${{ matrix.engine }}
+      - name: Run isolated browser acceptance
+        run: |
+          if [ "${{ matrix.engine }}" = "chromium" ]; then
+            npm run test:e2e -- --project=chromium --project=tablet --project=mobile
+          elif [ "${{ matrix.engine }}" = "webkit" ]; then
+            npm run test:e2e -- --project=webkit --workers=1
+          else
+            npm run test:e2e -- --project=firefox
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: leafspace-browser-evidence
+          name: leafspace-browser-evidence-${{ matrix.engine }}
           path: |
             playwright-report/
             test-results/

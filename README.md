@@ -118,6 +118,6 @@ npx playwright install --with-deps chromium firefox webkit
 npm run test:e2e
 ```
 
-`Product quality` GitHub Actions runs the same checks and uploads Playwright reports, failure traces and real desktop/tablet/mobile screenshots as `leafspace-browser-evidence`. Browser fixtures are small, generated PDFs, never personal documents. The configured matrix runs Chromium, Firefox and WebKit at 1440×900, plus Chromium at 768×1024 and 390×844. The exact commit’s Actions report is authoritative; WebKit automation is not a claim of real iPhone/iPad coverage.
+`Product quality` GitHub Actions runs the same checks and uploads Playwright reports, failure traces and real desktop/tablet/mobile screenshots as `leafspace-browser-evidence-<engine>`. Browser engines run in independent CI jobs; WebKit uses one worker to avoid competing native focus. Browser fixtures are small, generated PDFs, never personal documents. The configured matrix runs Chromium, Firefox and WebKit at 1440×900, plus Chromium at 768×1024 and 390×844. The exact commit’s Actions report is authoritative; WebKit automation is not a claim of real iPhone/iPad coverage.
 
 See [browser coverage and evidence](src/tests/e2e/README.md) for scenarios and artifact interpretation.
