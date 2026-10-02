@@ -37,9 +37,11 @@ test('welcome and reader remain usable at the project viewport', async ({ page }
   // Safari does not focus buttons on a pointer click. Start keyboard travel from
   // an explicit focus target, then verify native reverse/forward tab order.
   await page.getByRole('button', { name: '下一页', exact: true }).focus();
-  await page.keyboard.press('Shift+Tab');
+  // WebKit's native full-control traversal uses Option/Alt+Tab when Full Keyboard
+  // Access is off (https://github.com/microsoft/playwright/issues/5609).
+  await page.keyboard.press(testInfo.project.name === 'webkit' ? 'Alt+Shift+Tab' : 'Shift+Tab');
   await expect(page.getByRole('slider', { name: '跳转到页码' })).toBeFocused();
-  await page.keyboard.press('Tab');
+  await page.keyboard.press(testInfo.project.name === 'webkit' ? 'Alt+Tab' : 'Tab');
   const nextPage = page.getByRole('button', { name: '下一页', exact: true });
   await expect(nextPage).toBeFocused();
   await expect.poll(() => nextPage.evaluate((button) => button.matches(':focus-visible'))).toBe(true);

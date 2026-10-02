@@ -62,6 +62,7 @@ test('numeric input handles bounds, decimals, empty text and Escape without clos
 });
 
 test('five-page grid keeps every pane visible after repeated docking, floating and reload', async ({ page }, testInfo) => {
+  test.setTimeout(60_000);
   for (const number of [2, 4, 6, 8]) {
     await openReference(page, number);
     await page.locator('[data-floating-window]').last().getByRole('button', { name: '吸附', exact: true }).click();

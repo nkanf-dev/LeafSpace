@@ -225,7 +225,7 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
           <div className="min-h-0 flex-1 overflow-hidden">
             <ReaderViewport pageNumber={win.pageNumber} windowId={win.id} />
           </div>
-          <div className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize bg-[linear-gradient(135deg,transparent_50%,var(--border)_50%)] hover:bg-[linear-gradient(135deg,transparent_50%,#1c1917_50%)]" onMouseDown={(e) => handleResizeStart(e, win)} />
+          <div className="absolute bottom-0 right-0 hidden h-4 w-4 cursor-nwse-resize sm:block bg-[linear-gradient(135deg,transparent_50%,var(--border)_50%)] hover:bg-[linear-gradient(135deg,transparent_50%,#1c1917_50%)]" onMouseDown={(e) => handleResizeStart(e, win)} />
         </div>
       ))}
     </div>

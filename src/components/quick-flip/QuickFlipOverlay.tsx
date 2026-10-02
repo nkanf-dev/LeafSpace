@@ -279,10 +279,10 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     if (!isVisible) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     overlayRef.current?.focus();
-    const stopHold = () => { setPressedDirection(null); holdStartTimeRef.current = null; };
+    const stopHold = () => { setPressedDirection(null); holdStartTimeRef.current = null; scheduleTimelineExit(); };
     window.addEventListener('blur', stopHold);
     return () => { window.removeEventListener('blur', stopHold); if (restoreFocusOnClose) previousFocus?.focus(); };
-  }, [isVisible, restoreFocusOnClose]);
+  }, [isVisible, restoreFocusOnClose, scheduleTimelineExit]);
 
   useEffect(() => {
     if (!isVisible || pressedDirection === null) {
@@ -380,14 +380,14 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if ((e.key === 'ArrowRight' && pressedDirection === 1) || (e.key === 'ArrowLeft' && pressedDirection === -1)) {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         e.preventDefault();
         setPressedDirection(null);
         holdStartTimeRef.current = null;
 
-        if (viewMode === 'timeline') {
-          scheduleTimelineExit();
-        }
+        // A keyup can arrive after timeline DOM commits but before this effect
+        // receives its new viewMode. Always schedule settling to avoid a stuck mode.
+        scheduleTimelineExit();
       }
     };
 
