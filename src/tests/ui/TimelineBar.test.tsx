@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { TimelineBar } from '../../components/timeline/TimelineBar';
 
@@ -59,6 +59,13 @@ describe('timeline preview', () => {
     fireEvent.keyDown(slider, { key: 'ArrowRight' });
     fireEvent.change(slider, { target: { value: '4' } });
     expect(navigate).toHaveBeenCalledExactlyOnceWith(4);
+  });
+  it('accepts independent onChange-only input after a canceled pointer has finished', async () => {
+    const { start, move, end, navigate, slider } = setup();
+    start(); move(); fireEvent.pointerCancel(slider); end();
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1)); });
+    fireEvent.change(slider, { target: { value: '5' } });
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(5);
   });
   it('discards a stale drag after external navigation', () => {
     const { start, move, end, navigate, view } = setup();

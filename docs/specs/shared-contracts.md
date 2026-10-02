@@ -249,3 +249,10 @@ clearWorkspace(documentId: string): Promise<void>
 - 不允许一个 agent 为了省事改其他模块核心类型而不说明。
 - 不允许把速翻的当前页做成独立于 `bookStore.currentPage` 的长期真源。
 
+
+## Reader touch and timeline transactions
+
+- Reader touch ownership is per surface/window. Fit-width grab mode reserves horizontal swipes; overflow uses native two-axis panning. Vertical scrolling remains native. Two contacts must start in the same surface; a third/foreign contact, cancellation, blur, context change or temporary-layer key discards the gesture.
+- Pinch preview transforms pixels locally; release commits one clamped reader scale with the original paper point anchored to the ending midpoint. It never changes another window or the browser viewport scale. Existing 10–400% stored scale compatibility is retained.
+- Timeline pointer preview is transient and never enters book/window stores or autosave. A normal release commits once to the originating active window. Moving more than56px vertically from the starting track position marks release as cancel; moving back resumes preview. Escape/Space, lost capture, pointercancel, blur, book/window/overlay change cancel. Native range keyboard and independent change input remain available.
+- Chromium CDP native touch input and cross-engine DOM TouchEvent contracts are separate evidence categories. iPhone-sized WebKit emulation is not physical iOS testing.

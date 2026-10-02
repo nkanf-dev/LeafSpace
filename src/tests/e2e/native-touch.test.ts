@@ -35,8 +35,17 @@ test('native touch: swipes turn, pinch zooms paper, native panning stays local, 
   await expect(page.locator('header')).toContainText('第 1 页');
   await pinch(session, region, 2, true);
   await expect(page.getByRole('button', { name: '恢复适合宽度' })).toHaveText('100%');
+  const original = await region.evaluate(el => {
+    const bounds = el.getBoundingClientRect(), paper = el.querySelector('canvas')!.getBoundingClientRect();
+    return { width: paper.width, x: (bounds.left + bounds.width / 2 - paper.left) / paper.width, y: (bounds.top + bounds.height / 2 - paper.top) / paper.height };
+  });
   await pinch(session, region, 2);
   await expect(page.getByRole('button', { name: '恢复适合宽度' })).toHaveText('200%');
+  await expect.poll(() => region.locator('canvas').evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThan(original.width * 1.9);
+  await expect.poll(() => region.evaluate((el, origin) => {
+    const bounds = el.getBoundingClientRect(), paper = el.querySelector('canvas')!.getBoundingClientRect();
+    return Math.max(Math.abs((bounds.left + bounds.width / 2 - paper.left) / paper.width - origin.x), Math.abs((bounds.top + bounds.height / 2 - paper.top) / paper.height - origin.y));
+  }, original)).toBeLessThan(0.01);
   await expect.poll(() => region.evaluate(el => el.scrollWidth > el.clientWidth + 50)).toBe(true);
   await expect.poll(() => page.evaluate(() => visualViewport?.scale)).toBe(1);
   const top = await region.evaluate(el => el.scrollTop);
@@ -52,7 +61,7 @@ test('native touch: swipes turn, pinch zooms paper, native panning stays local, 
   await session.detach();
 });
 
-test('native touch targets the reference pane and browser zoom remains available outside the reader', async ({ page }) => {
+test('native touch targets the reference pane and browser zoom remains available outside the reader', async ({ page }, info) => {
   await page.goto('/'); await importBook(page);
   await page.getByRole('button', { name: /^速翻/ }).click();
   await expect(quickFlip(page)).toBeVisible();
@@ -69,7 +78,40 @@ test('native touch targets the reference pane and browser zoom remains available
   await page.getByRole('button', { name: '回到书库' }).click();
   await expect(page.getByRole('heading', { name: '页境阅读' })).toBeVisible();
   const before = await page.evaluate(() => visualViewport?.scale ?? 1);
-  await pinch(session, page.locator('body'), 1.5);
+  await pinch(session, page.locator('body'), 3);
+  const appScale = await page.evaluate(() => visualViewport?.scale ?? 1);
+  if (appScale <= before) {
+    const probe = await page.context().newPage();
+    await probe.setContent('<meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0;width:100vw;height:100vh;background:#eee">Native browser zoom probe</body>');
+    const probeSession = await page.context().newCDPSession(probe);
+    await pinch(probeSession, probe.locator('body'), 3);
+    const rawScale = await probe.evaluate(() => visualViewport?.scale);
+    await probeSession.send('Input.synthesizePinchGesture', { x: 190, y: 300, scaleFactor: 3, gestureSourceType: 'touch', relativeSpeed: 200 });
+    await info.attach('independent-native-browser-zoom-probe', { body: JSON.stringify({ appScale, rawScale, synthesizedScale: await probe.evaluate(() => visualViewport?.scale), viewport: await probe.evaluate(() => ({ width: innerWidth, height: innerHeight, touch: navigator.maxTouchPoints })) }), contentType: 'application/json' });
+    await probe.close();
+  }
   await expect.poll(() => page.evaluate(() => visualViewport?.scale ?? 1)).toBeGreaterThan(before);
+  await session.detach();
+});
+
+
+test('native touch timeline previews, cancels by moving away, then commits a fresh drag', async ({ page }) => {
+  await page.goto('/'); await importBook(page);
+  const slider = page.getByRole('slider', { name: '跳转到页码' });
+  const box = await slider.boundingBox(); if (!box) throw new Error('Missing slider');
+  const session = await page.context().newCDPSession(page);
+  const start = { id: 1, x: box.x + 8, y: box.y + box.height / 2 };
+  const target = { ...start, x: box.x + box.width * 0.7 };
+  await send(session, 'touchStart', [start]); await send(session, 'touchMove', [target]);
+  await expect(slider).toHaveAttribute('aria-valuetext', /^预览：/);
+  await expect(page.locator('header')).toContainText('第 1 页');
+  await send(session, 'touchMove', [{ ...target, y: start.y - 100 }]);
+  await expect(page.getByText('松开取消 · 移回继续')).toBeVisible();
+  await send(session, 'touchEnd', []);
+  await expect(page.locator('header')).toContainText('第 1 页');
+  await send(session, 'touchStart', [start]); await send(session, 'touchMove', [target]);
+  const number = Number(await slider.inputValue()); expect(number).toBeGreaterThan(1);
+  await send(session, 'touchEnd', []);
+  await expect(page.locator('header')).toContainText(`第 ${number} 页`);
   await session.detach();
 });

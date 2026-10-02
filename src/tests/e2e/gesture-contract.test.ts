@@ -82,3 +82,22 @@ test('touch-event contract: pinch preview is cancellable and repeated staggered 
   await expect(page.locator('header')).toContainText('第 1 页');
   await info.attach('touch-contract-zoomed-paper', { body: await page.screenshot(), contentType: 'image/png' });
 });
+
+
+test('timeline moving away cancels on release and returning to the track resumes preview', async ({ page }) => {
+  await page.goto('/'); await importBook(page);
+  const slider = page.getByRole('slider', { name: '跳转到页码' });
+  const box = await slider.boundingBox(); if (!box) throw new Error('Missing slider');
+  await dragStart(page, slider, 0.5);
+  await page.mouse.move(box.x + box.width / 2, box.y - 100);
+  await expect(page.getByText('松开取消 · 移回继续')).toBeVisible();
+  await page.mouse.up();
+  await expect(page.locator('header')).toContainText('第 1 页');
+  await dragStart(page, slider, 0.6);
+  await page.mouse.move(box.x + box.width / 2, box.y - 100);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const target = Number(await slider.inputValue());
+  await expect(page.getByText('松开跳转 · 移开取消')).toBeVisible();
+  await page.mouse.up();
+  await expect(page.locator('header')).toContainText(`第 ${target} 页`);
+});

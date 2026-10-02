@@ -128,7 +128,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     const availableWidth = Math.max(0, container.clientWidth - horizontalPadding);
     const availableHeight = Math.max(0, container.clientHeight - verticalPadding);
 
-    setShouldCenterHorizontally(contentFrame.offsetWidth <= availableWidth);
+    setShouldCenterHorizontally(contentFrame.offsetWidth <= availableWidth + 2);
     setShouldCenterVertically(contentFrame.offsetHeight <= availableHeight);
   }, []);
 
@@ -447,7 +447,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
         onMouseDownCapture={handleViewportFocus}
         onKeyDown={handleViewportKeyDown}
         onScroll={handleScroll}
-        style={{ cursor: mode === 'grab' ? (isPanning ? 'grabbing' : 'grab') : 'default', touchAction: 'pan-x pan-y' }}
+        style={{ cursor: mode === 'grab' ? (isPanning ? 'grabbing' : 'grab') : 'default', touchAction: mode === 'grab' && shouldCenterHorizontally ? 'pan-y' : 'pan-x pan-y' }}
       >
         <div
           className={`flex min-h-full min-w-full px-4 py-6 sm:px-10 sm:py-[60px] ${shouldCenterHorizontally ? 'justify-center' : 'justify-start'} ${shouldCenterVertically ? 'items-center' : 'items-start'}`}
