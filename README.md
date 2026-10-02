@@ -121,3 +121,10 @@ npm run test:e2e
 `Product quality` GitHub Actions runs the same checks and uploads Playwright reports, failure traces and real desktop/tablet/mobile screenshots as `leafspace-browser-evidence-<engine>`. Browser engines run in independent CI jobs; WebKit uses one worker to avoid competing native focus. Browser fixtures are small, generated PDFs, never personal documents. The configured matrix runs Chromium, Firefox and WebKit at 1440×900, plus Chromium at 768×1024 and 390×844. The exact commit’s Actions report is authoritative; WebKit automation is not a claim of real iPhone/iPad coverage.
 
 See [browser coverage and evidence](src/tests/e2e/README.md) for scenarios and artifact interpretation.
+
+### Touch and timeline navigation
+
+- In grab mode, a deliberate left/right swipe turns the touched reader page when its paper fits horizontally. At zoom overflow, one finger pans naturally instead; vertical scrolling and text selection remain native.
+- Two fingers on the same reader preview a paper zoom, then commit at release around the fingers' midpoint. Cancelled/interrupted gestures leave the saved scale unchanged. Reader zoom remains independent per window; browser pinch zoom is available outside the reader.
+- Drag the footer timeline to preview a page number without changing or saving the reading position. Release to jump, or move vertically away from the track and release to cancel (move back to resume). Escape/Space also cancels. Keyboard arrows and track clicks still navigate directly. Changing book/window or leaving the interaction cancels its temporary selection.
+- CI includes Chromium native CDP touch input at tablet/mobile viewports and cross-engine event-contract tests, including iPhone-sized WebKit emulation. This does not claim physical iOS hardware validation.

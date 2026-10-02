@@ -3,6 +3,8 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import { useBookStore } from '../../stores/bookStore';
 import { useHeldStore } from '../../stores/heldStore';
 import { useWindowStore } from '../../stores/windowStore';
+import { useQuickFlipStore } from '../../stores/quickFlipStore';
+import { useReaderGestures } from '../../hooks/useReaderGestures';
 import { MousePointer2, Hand, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -31,6 +33,8 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   const currentWindow = useWindowStore(state => state.windows.find((candidate) => candidate.id === (windowId ?? 'main')));
   const updateWindow = useWindowStore(state => state.updateWindow);
   const setActiveWindow = useWindowStore(state => state.setActiveWindow);
+  const activeWindowId = useWindowStore(state => state.activeWindowId);
+  const quickFlipVisible = useQuickFlipStore(state => state.isOpen);
   const activePage = isMain ? globalCurrentPage : (pageNumber || 1);
   const storedMode = currentWindow?.viewport?.mode ?? 'grab';
   const storedScale = isMain ? globalScale : (currentWindow?.viewport?.scale ?? 1);
@@ -124,7 +128,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     const availableWidth = Math.max(0, container.clientWidth - horizontalPadding);
     const availableHeight = Math.max(0, container.clientHeight - verticalPadding);
 
-    setShouldCenterHorizontally(contentFrame.offsetWidth <= availableWidth);
+    setShouldCenterHorizontally(contentFrame.offsetWidth <= availableWidth + 2);
     setShouldCenterVertically(contentFrame.offsetHeight <= availableHeight);
   }, []);
 
@@ -351,6 +355,22 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     }
   }, [setActiveWindow, windowId]);
 
+  useReaderGestures({
+    containerRef, frameRef: contentFrameRef, scale, canSwipe: mode === 'grab', isActive: activeWindowId === (windowId ?? 'main'),
+    contextKey: `${documentUrl}:${activePage}:${quickFlipVisible}:${scale}:${mode}`,
+    onActivate: handleViewportFocus,
+    onTurn: direction => updateActivePage(activePage + direction),
+    onZoom: (nextScale, anchor, midpoint) => {
+      const bounds = containerRef.current?.getBoundingClientRect();
+      if (!bounds) return;
+      cancelPanAnimation();
+      const x = midpoint.x - bounds.left;
+      const y = midpoint.y - bounds.top;
+      zoomPivot.current = { x, y, frameX: x - anchor.x * scale, frameY: y - anchor.y * scale, oldScale: scale };
+      updateScale(nextScale);
+    },
+  });
+
   const handleViewportKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     // Ignore if any modifier keys are pressed (except shift for screenshot)
     if (e.altKey || e.metaKey || e.ctrlKey) {
@@ -427,7 +447,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
         onMouseDownCapture={handleViewportFocus}
         onKeyDown={handleViewportKeyDown}
         onScroll={handleScroll}
-        style={{ cursor: mode === 'grab' ? (isPanning ? 'grabbing' : 'grab') : 'default', touchAction: 'pan-x pan-y' }}
+        style={{ cursor: mode === 'grab' ? (isPanning ? 'grabbing' : 'grab') : 'default', touchAction: mode === 'grab' && shouldCenterHorizontally ? 'pan-y' : 'pan-x pan-y' }}
       >
         <div
           className={`flex min-h-full min-w-full px-4 py-6 sm:px-10 sm:py-[60px] ${shouldCenterHorizontally ? 'justify-center' : 'justify-start'} ${shouldCenterVertically ? 'items-center' : 'items-start'}`}
