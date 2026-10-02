@@ -35,14 +35,43 @@ test('welcome and reader remain usable at the project viewport', async ({ page }
   await expectNoDocumentOverflow(page);
   await capture(page, testInfo, 'reader');
   await page.bringToFront();
-  // Safari does not focus buttons on a pointer click. Start keyboard travel from
-  // an explicit focus target, then verify native reverse/forward tab order.
-  await page.getByRole('button', { name: '下一页', exact: true }).focus();
-  await page.keyboard.press('Shift+Tab');
-  await testInfo.attach('native-keyboard-focus', { body: JSON.stringify(await page.evaluate(() => ({ documentFocused: document.hasFocus(), active: document.activeElement?.outerHTML }))), contentType: 'application/json' });
-  await expect(page.getByRole('slider', { name: '跳转到页码' })).toBeFocused();
-  await page.keyboard.press('Tab');
   const nextPage = page.getByRole('button', { name: '下一页', exact: true });
+  const timeline = page.getByRole('slider', { name: '跳转到页码' });
+  let nativeSequentialTab = true;
+  if (testInfo.project.name === 'webkit') {
+    const probe = await page.context().newPage();
+    await probe.setContent('<input aria-label="Probe number" value="2"><input type="range" aria-label="Probe range" tabindex="0"><button aria-label="Probe next" tabindex="0">Next</button>');
+    await probe.bringToFront();
+    await probe.getByRole('button', { name: 'Probe next' }).focus();
+    await probe.keyboard.press('Shift+Tab');
+    const state = await probe.evaluate(() => ({ documentFocused: document.hasFocus(), active: document.activeElement?.getAttribute('aria-label') }));
+    nativeSequentialTab = state.active === 'Probe range';
+    await testInfo.attach('webkit-app-independent-tab-probe', { body: JSON.stringify(state), contentType: 'application/json' });
+    await probe.close();
+    await page.bringToFront();
+  }
+  if (!nativeSequentialTab) {
+    // Native WebKit tab traversal depends on Full Keyboard Access settings
+    // (https://github.com/microsoft/playwright/issues/5609). Verify the app's
+    // real keyboard activation contract without assuming the runner's OS setting.
+    await timeline.focus();
+    await timeline.press('ArrowRight');
+    await expect(page.locator('header')).toContainText('第 3 页');
+    await timeline.press('ArrowLeft');
+    await expect(page.locator('header')).toContainText('第 2 页');
+    await nextPage.focus();
+    await nextPage.press('Space');
+    await expect(page.locator('header')).toContainText('第 3 页');
+    await page.getByRole('button', { name: '上一页', exact: true }).focus();
+    await page.keyboard.press('Space');
+    await expect(page.locator('header')).toContainText('第 2 页');
+    await nextPage.focus();
+  } else {
+    await nextPage.focus();
+    await page.keyboard.press('Shift+Tab');
+    await expect(timeline).toBeFocused();
+    await page.keyboard.press('Tab');
+  }
   await expect(nextPage).toBeFocused();
   await expect.poll(() => nextPage.evaluate((button) => button.matches(':focus-visible'))).toBe(true);
   await capture(page, testInfo, 'keyboard-focus');
