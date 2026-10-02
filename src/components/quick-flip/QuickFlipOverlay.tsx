@@ -14,6 +14,7 @@ interface Props {
   currentPage: number;
   totalPages: number;
   onPageChange: (page: number) => void;
+  restoreFocusOnClose?: boolean;
 }
 
 const MAX_ALIGNMENT_ATTEMPTS = 18;
@@ -48,7 +49,7 @@ function buildSectionMarkers(totalPages: number): number[] {
   return Array.from(markers).sort((left, right) => left - right);
 }
 
-export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentPage, totalPages, onPageChange }) => {
+export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentPage, totalPages, onPageChange, restoreFocusOnClose = true }) => {
   const [selectedPage, setSelectedPage] = useState(currentPage);
   const [scrollAnchorPage, setScrollAnchorPage] = useState(currentPage);
   const [zoom, setZoom] = useState(1.0);
@@ -280,8 +281,8 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     overlayRef.current?.focus();
     const stopHold = () => { setPressedDirection(null); holdStartTimeRef.current = null; };
     window.addEventListener('blur', stopHold);
-    return () => { window.removeEventListener('blur', stopHold); previousFocus?.focus(); };
-  }, [isVisible]);
+    return () => { window.removeEventListener('blur', stopHold); if (restoreFocusOnClose) previousFocus?.focus(); };
+  }, [isVisible, restoreFocusOnClose]);
 
   useEffect(() => {
     if (!isVisible || pressedDirection === null) {

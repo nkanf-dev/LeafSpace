@@ -181,7 +181,7 @@ describe('App document workflows', () => {
     await act(async () => fireEvent.keyDown(window, { key: 'Escape' }));
     expect(windowStore.getState().windows.map(window => window.id)).toEqual(['main', lower]);
     expect(windowStore.getState().windows.some(window => window.id === upper)).toBe(false);
-    expect(screen.getByRole('region', { name: '主阅读区' })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole('region', { name: '主阅读区' })).toHaveFocus());
     fireEvent.keyDown(window, { key: 'Escape' });
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(windowStore.getState().windows).toHaveLength(1);

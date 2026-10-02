@@ -34,6 +34,9 @@ test('welcome and reader remain usable at the project viewport', async ({ page }
   await expect(page.locator('header')).toContainText('第 2 页');
   await expectNoDocumentOverflow(page);
   await capture(page, testInfo, 'reader');
+  // Safari does not focus buttons on a pointer click. Start keyboard travel from
+  // an explicit focus target, then verify native reverse/forward tab order.
+  await page.getByRole('button', { name: '下一页', exact: true }).focus();
   await page.keyboard.press('Shift+Tab');
   await expect(page.getByRole('slider', { name: '跳转到页码' })).toBeFocused();
   await page.keyboard.press('Tab');
@@ -160,10 +163,11 @@ test('mobile page tabs keep five references reachable and Quick Flip new-window 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/'); await importBook(page);
   for (let number = 2; number <= 5; number++) {
-    await page.getByRole('button', { name: /^速翻/ }).click();
-    const preview = quickFlip(page);
-    await preview.getByRole('button', { name: '预览下一页', exact: true }).click();
-    await preview.getByRole('button', { name: '打开参考窗', exact: true }).click();
+    await page.getByRole('region', { name: /阅读区/ }).focus();
+    await page.keyboard.press('Space');
+    await expect(quickFlip(page)).toBeVisible();
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('n');
     const ref = page.getByRole('region', { name: `参考阅读区，第 ${number} 页`, exact: true });
     await expect(ref.locator('canvas')).toBeVisible();
     await expect(page.getByRole('navigation', { name: '打开的页面' }).getByRole('button', { name: `参考 · ${number}`, exact: true })).toHaveAttribute('aria-pressed', 'true');
@@ -175,11 +179,23 @@ test('mobile page tabs keep five references reachable and Quick Flip new-window 
   await tabs.getByRole('button', { name: '参考 · 3', exact: true }).click();
   await expect(page.getByRole('region', { name: '参考阅读区，第 3 页', exact: true }).locator('canvas')).toBeVisible();
   await capture(page, testInfo, 'mobile-five-window-switcher');
+  const activeRegion = page.getByRole('region', { name: '参考阅读区，第 3 页', exact: true });
+  const activePane = page.locator('[data-reader-pane][data-mobile-active="true"]').filter({ has: activeRegion });
+  for (let index = 0; index < 5; index++) await activePane.getByRole('button', { name: '放大', exact: true }).click();
+  await expect.poll(() => activeRegion.evaluate(el => el.scrollWidth - el.clientWidth)).toBeGreaterThan(150);
+  await activeRegion.evaluate(el => el.scrollTo(150, 300));
+  await expect.poll(async () => {
+    const saved = (await snapshots(page))[0];
+    return Math.abs((saved?.windows.find(win => win.id === saved.activeWindowId)?.viewport?.scrollTop ?? -999) - 300);
+  }).toBeLessThanOrEqual(1);
   await page.getByRole('button', { name: '保存现场', exact: true }).click();
   await expect.poll(async () => (await snapshots(page))[0]?.windows.length).toBe(5);
   await page.reload();
   await page.getByRole('button', { name: /leafspace-12-pages\.pdf/ }).click();
   await expect(page.getByRole('region', { name: '参考阅读区，第 3 页', exact: true }).locator('canvas')).toBeVisible();
   await expect(tabs.getByRole('button', { name: '参考 · 3', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => activeRegion.evaluate(el => Math.abs(el.scrollLeft - 150))).toBeLessThanOrEqual(1);
+  await expect.poll(() => activeRegion.evaluate(el => Math.abs(el.scrollTop - 300))).toBeLessThanOrEqual(1);
+  await capture(page, testInfo, 'mobile-five-window-scroll-restored');
   await expectNoDocumentOverflow(page);
 });

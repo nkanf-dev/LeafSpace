@@ -38,11 +38,11 @@ function App() {
     openQuickFlip(page);
   }, [openQuickFlip]);
   const dismissQuickFlip = useCallback(() => {
+    const active = useWindowStore.getState().activeWindowId;
     closeQuickFlip();
     // React removes background inertness during the commit. Restore focus after it,
     // using the opener captured before inert moved focus away from the reader.
     window.requestAnimationFrame(() => {
-      const active = useWindowStore.getState().activeWindowId;
       if (active && active !== quickFlipOrigin.current.windowId) document.querySelector<HTMLElement>(`[data-window-id="${active}"] [role="region"]`)?.focus();
       else quickFlipOpener.current?.focus();
     });
@@ -113,7 +113,8 @@ function App() {
         if (topWindow) {
           event.preventDefault();
           useWindowStore.getState().closeWindow(topWindow.id);
-          document.querySelector<HTMLElement>('[aria-label="主阅读区"]')?.focus();
+          useWindowStore.getState().setActiveWindow('main');
+          window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[aria-label="主阅读区"]')?.focus());
         }
         return;
       }
@@ -246,7 +247,7 @@ function App() {
         </main>
         {documentId && <footer className="h-16 shrink-0 border-t border-[var(--border)]"><TimelineBar currentPage={activePage} chapters={book.toc} totalPages={totalPages} onPageClick={jumpToPage} markers={heldPages.map((page) => page.pageNumber)} /></footer>}
       </div>
-      {isQuickFlipVisible && ready && <QuickFlipOverlay isVisible onClose={dismissQuickFlip} currentPage={quickFlipOrigin.current.page} totalPages={totalPages} onPageChange={page => { updateWindow(quickFlipOrigin.current.windowId, { pageNumber: page }); setActiveWindow(quickFlipOrigin.current.windowId); }} />}
+      {isQuickFlipVisible && ready && <QuickFlipOverlay isVisible restoreFocusOnClose={false} onClose={dismissQuickFlip} currentPage={quickFlipOrigin.current.page} totalPages={totalPages} onPageChange={page => { updateWindow(quickFlipOrigin.current.windowId, { pageNumber: page }); setActiveWindow(quickFlipOrigin.current.windowId); }} />}
     </>
   );
 }
