@@ -245,7 +245,7 @@ function App() {
             }} onPageClick={(page) => { openInNewWindow(page.pageNumber); closeHeldPanel(); }} onRemovePage={(id, closeReferences) => { const page = heldPages.find((candidate) => candidate.id === id); if (page) { if (closeReferences) useWindowStore.getState().closeWindowsForPage(page.pageNumber); unholdPage(page.pageNumber); } }} />
           </aside>}
         </main>
-        {documentId && <footer className="h-16 shrink-0 border-t border-[var(--border)]"><TimelineBar currentPage={activePage} chapters={book.toc} totalPages={totalPages} onPageClick={jumpToPage} markers={heldPages.map((page) => page.pageNumber)} /></footer>}
+        {documentId && <footer className="h-16 shrink-0 border-t border-[var(--border)]"><TimelineBar key={`${documentId}:${activeWindowId}:${isQuickFlipVisible}:${showHeldPages}`} currentPage={activePage} chapters={book.toc} totalPages={totalPages} onPageClick={jumpToPage} markers={heldPages.map((page) => page.pageNumber)} /></footer>}
       </div>
       {isQuickFlipVisible && ready && <QuickFlipOverlay isVisible restoreFocusOnClose={false} onClose={dismissQuickFlip} currentPage={quickFlipOrigin.current.page} totalPages={totalPages} onPageChange={page => { updateWindow(quickFlipOrigin.current.windowId, { pageNumber: page }); setActiveWindow(quickFlipOrigin.current.windowId); }} />}
     </>
