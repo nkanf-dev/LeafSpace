@@ -24,7 +24,7 @@ Playwright builds the deployable bundle, then starts Vite preview on `127.0.0.1:
 
 Every test gets an isolated browser context and real IndexedDB. Fixture imports use the real file input; tests do not inject application stores. IndexedDB is read for durable-save checkpoints. Three recovery tests deliberately replace or delete only their isolated synthetic-book records to simulate malformed snapshots, partial legacy data, and a missing local file. The single deliberate 1.5-second idle wait checks three autosave debounce periods for an unwanted write loop.
 
-Native sequential Tab traversal is asserted on Chromium and Firefox. WebKit's native traversal depends on Full Keyboard Access settings; an app-independent minimal-page probe records the runner's behavior. If native traversal is unavailable, its tests assert actual range-arrow and button-Space activation plus visible focus. That is narrower coverage: WebKit native sequential Tab order then remains unverified. This is not a claim about every Safari OS keyboard preference.
+Native reverse/forward Tab traversal and visible focus are asserted on all three engines. A standalone WebKit SVG hit-target probe documents the browser's clicked-descendant behavior; decorative SVGs are non-interactive so button clicks preserve normal keyboard navigation.
 
 ## Evidence
 

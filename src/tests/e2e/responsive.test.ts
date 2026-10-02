@@ -34,64 +34,26 @@ test('welcome and reader remain usable at the project viewport', async ({ page }
   await expect(page.locator('header')).toContainText('第 2 页');
   await expectNoDocumentOverflow(page);
   await capture(page, testInfo, 'reader');
+  if (testInfo.project.name === 'webkit') {
+    const probe = await page.context().newPage();
+    const results: Record<string, string | null> = {};
+    for (const [name, style] of [['svg-hit-target', ''], ['button-hit-target', 'pointer-events:none']]) {
+      await probe.setContent(`<input type="range" aria-label="Probe range" tabindex="0"><button aria-label="Probe next" tabindex="0"><svg style="${style}" width="20" height="20" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" fill="none" stroke="black" /></svg></button>`);
+      await probe.getByRole('button', { name: 'Probe next' }).click();
+      await probe.getByRole('button', { name: 'Probe next' }).focus();
+      await probe.keyboard.press('Shift+Tab');
+      results[name] = await probe.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? null);
+    }
+    await testInfo.attach('webkit-svg-hit-target-probe', { body: JSON.stringify(results), contentType: 'application/json' });
+    await probe.close();
+  }
   await page.bringToFront();
   const nextPage = page.getByRole('button', { name: '下一页', exact: true });
   const timeline = page.getByRole('slider', { name: '跳转到页码' });
-  let nativeSequentialTab = true;
-  if (testInfo.project.name === 'webkit') {
-    const probe = await page.context().newPage();
-    await probe.setContent('<input aria-label="Probe number" value="2"><input type="range" aria-label="Probe range" tabindex="0"><button aria-label="Probe next" tabindex="0">Next</button>');
-    await probe.bringToFront();
-    await probe.getByRole('button', { name: 'Probe next' }).focus();
-    await probe.keyboard.press('Shift+Tab');
-    const state = await probe.evaluate(() => ({ documentFocused: document.hasFocus(), active: document.activeElement?.getAttribute('aria-label') }));
-    nativeSequentialTab = state.active === 'Probe range';
-    await testInfo.attach('webkit-app-independent-tab-probe', { body: JSON.stringify(state), contentType: 'application/json' });
-    const footer = await page.locator('footer').evaluate(el => el.outerHTML);
-    const styles = await page.evaluate(() => Array.from(document.styleSheets).map(sheet => Array.from(sheet.cssRules).map(rule => rule.cssText).join('\n')).join('\n'));
-    const variants: Record<string, unknown> = {};
-    for (const [name, css] of [['sameStyles', styles], ['nativeRange', styles + '.page-range { appearance:auto!important; -webkit-appearance:auto!important; }'], ['unstyled', '']]) {
-      await probe.setContent(`<style>${css}</style>${footer}`);
-      await probe.getByRole('button', { name: '下一页', exact: true }).focus();
-      await probe.keyboard.press('Shift+Tab');
-      variants[name] = await probe.evaluate(() => ({ focused: document.hasFocus(), active: document.activeElement?.outerHTML }));
-    }
-    await testInfo.attach('webkit-footer-isolation', { body: JSON.stringify(variants), contentType: 'application/json' });
-    await page.evaluate(() => {
-      const trace: unknown[] = [];
-      (window as typeof window & { __leafFocusTrace: unknown[] }).__leafFocusTrace = trace;
-      const record = (phase: string, event: Event) => trace.push({ phase, type: event.type, key: event instanceof KeyboardEvent ? event.key : undefined, prevented: event.defaultPrevented, target: event.target instanceof Element ? event.target.getAttribute('aria-label') : null, active: document.activeElement?.getAttribute('aria-label') });
-      document.addEventListener('keydown', event => record('capture', event), true);
-      window.addEventListener('keydown', event => record('bubble', event));
-      document.addEventListener('focusin', event => record('focus', event));
-      document.addEventListener('focusout', event => record('blur', event));
-    });
-    await probe.close();
-    await page.bringToFront();
-  }
-  if (!nativeSequentialTab) {
-    // Native WebKit tab traversal depends on Full Keyboard Access settings
-    // (https://github.com/microsoft/playwright/issues/5609). Verify the app's
-    // real keyboard activation contract without assuming the runner's OS setting.
-    await timeline.focus();
-    await timeline.press('ArrowRight');
-    await expect(page.locator('header')).toContainText('第 3 页');
-    await timeline.press('ArrowLeft');
-    await expect(page.locator('header')).toContainText('第 2 页');
-    await nextPage.focus();
-    await nextPage.press('Space');
-    await expect(page.locator('header')).toContainText('第 3 页');
-    await page.getByRole('button', { name: '上一页', exact: true }).focus();
-    await page.keyboard.press('Space');
-    await expect(page.locator('header')).toContainText('第 2 页');
-    await nextPage.focus();
-  } else {
-    await nextPage.focus();
-    await page.keyboard.press('Shift+Tab');
-    if (testInfo.project.name === 'webkit') await testInfo.attach('webkit-app-focus-events', { body: JSON.stringify(await page.evaluate(() => (window as typeof window & { __leafFocusTrace?: unknown[] }).__leafFocusTrace)), contentType: 'application/json' });
-    await expect(timeline).toBeFocused();
-    await page.keyboard.press('Tab');
-  }
+  await nextPage.focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(timeline).toBeFocused();
+  await page.keyboard.press('Tab');
   await expect(nextPage).toBeFocused();
   await expect.poll(() => nextPage.evaluate((button) => button.matches(':focus-visible'))).toBe(true);
   await capture(page, testInfo, 'keyboard-focus');

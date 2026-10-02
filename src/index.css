@@ -114,6 +114,9 @@ body.is-panning {
   outline-offset: 3px;
 }
 button { cursor: pointer; }
+/* Decorative SVGs must not become WebKit's pointer-based keyboard-navigation
+   starting node inside an already focused button. Keep the button as the hit target. */
+button svg { pointer-events: none; }
 button:disabled { cursor: not-allowed; }
 .page-range { appearance: none; height: 2rem; background: transparent; cursor: pointer; }
 .page-range::-webkit-slider-thumb { appearance: none; width: 16px; height: 20px; background: var(--surface); border: 2px solid #292524; border-radius: 2px; }

@@ -41,9 +41,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps ${{ matrix.engine }}
-      - name: Check WebKit keyboard entry point
-        if: matrix.engine == 'webkit'
-        run: npm run test:e2e -- --project=webkit --workers=1 --grep '^welcome and reader'
       - name: Run isolated browser acceptance
         run: |
           if [ "${{ matrix.engine }}" = "chromium" ]; then
