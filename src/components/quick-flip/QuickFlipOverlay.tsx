@@ -285,14 +285,20 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
   }, [isVisible, restoreFocusOnClose, scheduleTimelineExit]);
 
   useEffect(() => {
-    if (!isVisible || pressedDirection === null) {
+    if (!isVisible) return;
+    // Keyup can run in the timeline commit before this passive effect. The
+    // synchronous hold ref is authoritative; a stale held render must not cancel
+    // the exit timer. The idle render also owns settling as a second safeguard.
+    if (pressedDirection === null || holdStartTimeRef.current === null) {
+      if (holdStartTimeRef.current === null && viewMode === 'timeline') scheduleTimelineExit();
       return;
     }
 
     clearExitTimelineTimer();
 
     const intervalTimer = window.setInterval(() => {
-      const elapsed = holdStartTimeRef.current === null ? 0 : performance.now() - holdStartTimeRef.current;
+      if (holdStartTimeRef.current === null) return;
+      const elapsed = performance.now() - holdStartTimeRef.current;
 
       if (viewMode === 'thumbnails' && elapsed >= ACCELERATION_THRESHOLD_MS) {
         setViewMode('timeline');
@@ -310,7 +316,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     return () => {
       window.clearInterval(intervalTimer);
     };
-  }, [clearExitTimelineTimer, getAcceleratedStep, isVisible, pressedDirection, stepSelection, viewMode]);
+  }, [clearExitTimelineTimer, getAcceleratedStep, isVisible, pressedDirection, scheduleTimelineExit, stepSelection, viewMode]);
 
   useEffect(() => {
     if (!isVisible) return;
@@ -346,7 +352,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
         e.preventDefault();
         const direction = (e.key === 'ArrowRight' ? 1 : -1) as -1 | 1;
 
-        if (pressedDirection === direction) {
+        if (pressedDirection === direction && holdStartTimeRef.current !== null) {
           return;
         }
 

@@ -1,18 +1,21 @@
 import type { ComponentProps } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReaderViewport } from '../../components/reader/ReaderViewport';
 import { useBookStore } from '../../stores/bookStore';
 import { heldStore } from '../../stores/heldStore';
 import { windowStore } from '../../stores/windowStore';
 
+const renderLifecycle = vi.hoisted(() => ({ callbacks: [] as (() => void)[] }));
+
 // Exercise reader behavior against real stores without a canvas/PDF worker.
 vi.mock('react-pdf', () => ({
   pdfjs: { GlobalWorkerOptions: {}, version: 'test' },
   Document: ({ children }: ComponentProps<'div'>) => <div>{children}</div>,
-  Page: ({ pageNumber, scale, onRenderSuccess }: { pageNumber: number; scale: number; onRenderSuccess: () => void }) => (
-    <div data-testid="pdf-page" data-page={pageNumber} data-scale={scale}><button onClick={onRenderSuccess}>Complete PDF render</button></div>
-  ),
+  Page: ({ pageNumber, scale, onRenderSuccess }: { pageNumber: number; scale: number; onRenderSuccess: () => void }) => {
+    renderLifecycle.callbacks.push(onRenderSuccess);
+    return <div data-testid="pdf-page" data-page={pageNumber} data-scale={scale}><button onClick={onRenderSuccess}>Complete PDF render</button></div>;
+  },
 }));
 vi.mock('../../services/ThumbnailService', () => ({
   thumbnailService: {
@@ -32,12 +35,37 @@ function readerRegion() {
   return screen.getByRole('region', { name: /阅读区/ });
 }
 
+function mockScrollGeometry(element: HTMLElement) {
+  let width = 400, height = 300, scrollWidth = 900, scrollHeight = 1200;
+  let left = element.scrollLeft, top = element.scrollTop;
+  Object.defineProperties(element, {
+    clientWidth: { configurable: true, get: () => width }, clientHeight: { configurable: true, get: () => height },
+    scrollWidth: { configurable: true, get: () => scrollWidth }, scrollHeight: { configurable: true, get: () => scrollHeight },
+    scrollLeft: { configurable: true, get: () => left, set: (value: number) => { left = Math.max(0, Math.min(value, scrollWidth - width)); } },
+    scrollTop: { configurable: true, get: () => top, set: (value: number) => { top = Math.max(0, Math.min(value, scrollHeight - height)); } },
+  });
+  return (next: { width?: number; height?: number; scrollWidth?: number; scrollHeight?: number }) => {
+    width = next.width ?? width; height = next.height ?? height; scrollWidth = next.scrollWidth ?? scrollWidth; scrollHeight = next.scrollHeight ?? scrollHeight;
+    element.scrollLeft = left; element.scrollTop = top;
+  };
+}
+
+const resizeCallbacks: (() => void)[] = [];
 describe('ReaderViewport', () => {
   beforeEach(() => {
+    renderLifecycle.callbacks.length = 0;
+    resizeCallbacks.length = 0;
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { resizeCallbacks.push(callback); }
+      observe() {}
+      disconnect() {}
+    });
     useBookStore.getState().reset();
     heldStore.getState().reset();
     windowStore.getState().reset();
   });
+
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it('shows the waiting state before a document is loaded', () => {
     render(<ReaderViewport isMain windowId="main" />);
@@ -152,6 +180,116 @@ describe('ReaderViewport', () => {
       expect(windowStore.getState().windows[0].viewport?.scrollTop).toBe(320);
     });
     expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 150, scrollTop: 320 });
+  });
+
+  it('preserves one scroll delivered after zoom geometry but before PDF paint', async () => {
+    loadDocument(); render(<ReaderViewport isMain windowId="main" />);
+    mockScrollGeometry(readerRegion());
+    for (let index = 0; index < 5; index++) fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    fireEvent.scroll(readerRegion(), { target: { scrollLeft: 150, scrollTop: 300 } });
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 150, scrollTop: 300 });
+    fireEvent.click(screen.getByRole('button', { name: 'Complete PDF render' }));
+    await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); });
+    expect(readerRegion().scrollTop).toBe(300);
+    expect(readerRegion().scrollLeft).toBe(150);
+  });
+
+  it('captures a scroll before ResizeObserver can restore over its queued event', () => {
+    loadDocument(); render(<ReaderViewport isMain windowId="main" />);
+    mockScrollGeometry(readerRegion());
+    readerRegion().scrollLeft = 150; readerRegion().scrollTop = 300;
+    act(() => resizeCallbacks.forEach(callback => callback()));
+    expect(readerRegion().scrollTop).toBe(300);
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 150, scrollTop: 300 });
+  });
+
+  it('retains restore targets across geometry collapse and rapid scale/mode changes', () => {
+    loadDocument(); windowStore.getState().updateWindow('main', { viewport: { scrollLeft: 150, scrollTop: 300 } });
+    render(<ReaderViewport isMain windowId="main" />);
+    const geometry = mockScrollGeometry(readerRegion());
+    geometry({ scrollWidth: 400, scrollHeight: 300 });
+    fireEvent.scroll(readerRegion());
+    fireEvent.click(screen.getByRole('button', { name: '选择文字' }));
+    for (let index = 0; index < 5; index++) fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 150, scrollTop: 300 });
+    geometry({ scrollWidth: 900, scrollHeight: 1200 });
+    act(() => resizeCallbacks.forEach(callback => callback()));
+    expect(readerRegion().scrollLeft).toBe(150); expect(readerRegion().scrollTop).toBe(300);
+  });
+
+  it('accepts vertical intent while preserving a temporarily clamped horizontal target, then a real return to zero', () => {
+    loadDocument(); windowStore.getState().updateWindow('main', { viewport: { scrollLeft: 150, scrollTop: 300 } });
+    render(<ReaderViewport isMain windowId="main" />);
+    const geometry = mockScrollGeometry(readerRegion());
+    geometry({ scrollWidth: 400 });
+    fireEvent.scroll(readerRegion(), { target: { scrollTop: 200 } });
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 150, scrollTop: 200 });
+    geometry({ scrollWidth: 900 }); act(() => resizeCallbacks.forEach(callback => callback()));
+    fireEvent.scroll(readerRegion(), { target: { scrollTop: 0, scrollLeft: 0 } });
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 0, scrollTop: 0 });
+  });
+
+  it('retains hidden-pane offsets and restores them when visible again', () => {
+    loadDocument(); windowStore.getState().updateWindow('main', { viewport: { scrollLeft: 150, scrollTop: 300 } });
+    render(<ReaderViewport isMain windowId="main" />);
+    const geometry = mockScrollGeometry(readerRegion());
+    geometry({ width: 0, height: 0, scrollWidth: 0, scrollHeight: 0 });
+    fireEvent.scroll(readerRegion()); act(() => resizeCallbacks.forEach(callback => callback()));
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 150, scrollTop: 300 });
+    geometry({ width: 400, height: 300, scrollWidth: 900, scrollHeight: 1200 });
+    act(() => resizeCallbacks.forEach(callback => callback()));
+    expect(readerRegion().scrollLeft).toBe(150); expect(readerRegion().scrollTop).toBe(300);
+  });
+
+  it('ignores stale PDF completion callbacks after scale changes and cancels queued frames', () => {
+    loadDocument(); render(<ReaderViewport isMain windowId="main" />);
+    const stale = renderLifecycle.callbacks.at(-1)!;
+    const schedule = vi.spyOn(window, 'requestAnimationFrame');
+    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    schedule.mockClear(); act(() => stale());
+    expect(schedule).not.toHaveBeenCalled();
+    const cancel = vi.spyOn(window, 'cancelAnimationFrame');
+    fireEvent.click(screen.getByRole('button', { name: 'Complete PDF render' }));
+    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('does not persist hidden zero geometry when a pending zoom render completes', async () => {
+    loadDocument(); windowStore.getState().updateWindow('main', { viewport: { scrollLeft: 150, scrollTop: 300 } });
+    render(<ReaderViewport isMain windowId="main" />);
+    const geometry = mockScrollGeometry(readerRegion());
+    fireEvent.wheel(readerRegion(), { deltaY: -100, ctrlKey: true, clientX: 200, clientY: 150 });
+    geometry({ width: 0, height: 0, scrollWidth: 0, scrollHeight: 0 });
+    fireEvent.click(screen.getByRole('button', { name: 'Complete PDF render' }));
+    await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); });
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 150, scrollTop: 300 });
+    geometry({ width: 400, height: 300, scrollWidth: 900, scrollHeight: 1200 });
+    act(() => resizeCallbacks.forEach(callback => callback()));
+    expect(readerRegion().scrollLeft).toBe(150); expect(readerRegion().scrollTop).toBe(300);
+  });
+
+  it('rejects an old render completion after scale changes away and back', () => {
+    loadDocument(); render(<ReaderViewport isMain windowId="main" />);
+    const stale = renderLifecycle.callbacks.at(-1)!;
+    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    fireEvent.click(screen.getByRole('button', { name: '恢复适合宽度' }));
+    const schedule = vi.spyOn(window, 'requestAnimationFrame');
+    act(() => stale());
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
+  it('captures an undelivered scroll before creating the next wheel zoom anchor', async () => {
+    loadDocument(); render(<ReaderViewport isMain windowId="main" />);
+    const region = readerRegion(); mockScrollGeometry(region);
+    const frame = region.querySelector<HTMLElement>('.w-max')!;
+    vi.spyOn(region, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 400, 300));
+    vi.spyOn(frame, 'getBoundingClientRect').mockImplementation(() => new DOMRect(40 - region.scrollLeft, 40 - region.scrollTop, 612, 792));
+    region.scrollLeft = 100; region.scrollTop = 200;
+    fireEvent.wheel(region, { deltaY: -100, ctrlKey: true, clientX: 200, clientY: 150 });
+    fireEvent.click(screen.getByRole('button', { name: 'Complete PDF render' }));
+    await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); });
+    expect(region.scrollLeft).toBeCloseTo(139);
+    expect(region.scrollTop).toBeCloseTo(246.5);
   });
 
   it.each([[4, '放大'], [0.1, '缩小']] as const)('disables %s-scale zoom at the supported boundary', (scale, name) => {
