@@ -44,6 +44,7 @@ describe('timeline preview', () => {
     else if (kind === 'lostPointerCapture') fireEvent.lostPointerCapture(slider);
     else fireEvent.blur(window);
     end();
+    fireEvent.change(slider, { target: { value: '12' } });
     expect(navigate).not.toHaveBeenCalled();
   });
   it('allows a fresh drag after blur without receiving the old pointerup', () => {
@@ -51,6 +52,13 @@ describe('timeline preview', () => {
     start(); move(); fireEvent.blur(window);
     start(); move(); end();
     expect(navigate).toHaveBeenCalledExactlyOnceWith(12);
+  });
+  it('restores keyboard navigation after blur without the old pointerup', () => {
+    const { start, move, navigate, slider } = setup();
+    start(); move(); fireEvent.blur(window);
+    fireEvent.keyDown(slider, { key: 'ArrowRight' });
+    fireEvent.change(slider, { target: { value: '4' } });
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(4);
   });
   it('discards a stale drag after external navigation', () => {
     const { start, move, end, navigate, view } = setup();

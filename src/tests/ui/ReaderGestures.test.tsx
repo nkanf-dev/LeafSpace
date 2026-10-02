@@ -39,11 +39,12 @@ describe('reader touch transactions', () => {
     expect(onTurn).not.toHaveBeenCalled();
     expect(paper.style.transform).toBe('');
   });
-  it.each(['touchcancel', 'blur', 'third-contact', 'context'])('rolls back pinch on %s and allows a fresh gesture', kind => {
+  it.each(['touchcancel', 'blur', 'third-contact', 'context', 'Escape', ' '])('rolls back pinch on %s and allows a fresh gesture', kind => {
     const { event, touch, onZoom, onTurn, paper, view } = setup();
     event('touchstart', [touch(1, 100), touch(2, 200)]); event('touchmove', [touch(1, 50), touch(2, 250)]);
     if (kind === 'touchcancel') event('touchcancel', []);
     else if (kind === 'blur') fireEvent.blur(window);
+    else if (kind === 'Escape' || kind === ' ') fireEvent.keyDown(window, { key: kind });
     else if (kind === 'context') view.rerender(<Harness onTurn={onTurn} onZoom={onZoom} contextKey="book:2" />);
     else event('touchstart', [touch(1, 50), touch(2, 250), touch(3, 300)]);
     event('touchend', []);

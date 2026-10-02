@@ -41,6 +41,11 @@ export const TimelineBar: React.FC<Props> = ({ currentPage, totalPages, onPageCl
   }, []);
   const displayedPage = previewPage ?? currentPage;
   const safeTotal = Math.max(1, totalPages);
+  const pointerPage = (event: React.PointerEvent<HTMLInputElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const fraction = Math.min(1, Math.max(0, (event.clientX - bounds.left - 8) / Math.max(1, bounds.width - 16)));
+    return Math.round(1 + fraction * (safeTotal - 1));
+  };
   const progress = ((displayedPage - 1) / Math.max(1, safeTotal - 1)) * 100;
   return (
     <nav aria-label="阅读进度" className="flex h-full min-w-0 items-center gap-3 bg-[var(--surface)] px-3 sm:gap-6 sm:px-6">
@@ -61,11 +66,26 @@ export const TimelineBar: React.FC<Props> = ({ currentPage, totalPages, onPageCl
         <input ref={sliderRef} type="range" tabIndex={0} min={1} max={safeTotal} value={displayedPage} disabled={!totalPages} aria-label="跳转到页码" aria-describedby={hintId}
           aria-valuetext={`${previewPage === null ? '' : '预览：'}第 ${displayedPage} 页，共 ${totalPages} 页`}
           onPointerDown={event => {
-            if (event.button !== 0 || (drag.current && !drag.current.canceled)) return;
-            drag.current = { pointerId: event.pointerId, page: currentPage, canceled: false };
-            setPreview({ page: currentPage, origin: currentPage, total: totalPages });
+            if (event.button !== 0) return;
+            if (drag.current && !drag.current.canceled) { cancel(); return; }
+            // Own pointer dragging while retaining the native range's keyboard/AT
+            // semantics. WebKit's internal thumb capture conflicts with explicit
+            // input capture; native change timing also differs across engines.
+            event.preventDefault();
+            const page = pointerPage(event);
+            drag.current = { pointerId: event.pointerId, page, canceled: false };
+            setPreview({ page, origin: currentPage, total: totalPages });
             event.currentTarget.focus();
             event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={event => {
+            if (drag.current?.pointerId !== event.pointerId || drag.current.canceled) return;
+            const page = pointerPage(event);
+            drag.current.page = page;
+            setPreview({ page, origin: currentPage, total: totalPages });
+          }}
+          onKeyDown={event => {
+            if (drag.current?.canceled && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) drag.current = null;
           }}
           onChange={event => {
             const page = Number(event.target.value);
@@ -75,11 +95,10 @@ export const TimelineBar: React.FC<Props> = ({ currentPage, totalPages, onPageCl
           onPointerUp={event => {
             if (drag.current?.pointerId !== event.pointerId) return;
             const { page, canceled } = drag.current;
-            drag.current = null;
             setPreview(null);
-            if (!canceled) onPageClick(page);
+            if (!canceled) { drag.current = null; onPageClick(page); }
           }}
-          onPointerCancel={() => { drag.current = null; setPreview(null); }} onLostPointerCapture={() => { drag.current = null; setPreview(null); }} onBlur={cancel}
+          onPointerCancel={cancel} onLostPointerCapture={cancel} onBlur={cancel}
           className="page-range relative z-10 w-full" style={{ touchAction: 'none' }} />
         <span id={hintId} className="sr-only">拖动预览页码，松开跳转；Esc 或空格取消。方向键直接翻页。</span>
         {previewPage !== null && <output aria-live="polite" className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-2 w-max max-w-[min(18rem,85vw)] -translate-x-1/2 border border-stone-300 bg-[var(--surface)] px-3 py-2 text-center text-xs leading-5 text-stone-800 shadow-lg">

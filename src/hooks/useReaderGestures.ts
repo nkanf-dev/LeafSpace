@@ -119,6 +119,11 @@ export function useReaderGestures(options: Options) {
     const cancelTouch = (event: TouchEvent) => { cancel(); if (event.touches.length) gesture = { kind: 'blocked' }; };
     const click = (event: MouseEvent) => { if (performance.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); } };
     const visibility = () => { if (document.hidden) cancel(); };
+    const key = (event: KeyboardEvent) => {
+      if ((gesture?.kind === 'pinch' || gesture?.kind === 'swipe') && (event.key === 'Escape' || event.key === ' ')) {
+        event.preventDefault(); event.stopPropagation(); cancel();
+      }
+    };
     const observer = new MutationObserver(() => { if (gesture && unavailable()) cancel(); });
     observer.observe(document.body, { attributes: true, attributeFilter: ['inert'], subtree: true });
     container.addEventListener('touchstart', start, { passive: false });
@@ -126,6 +131,7 @@ export function useReaderGestures(options: Options) {
     container.addEventListener('touchend', end, { passive: false });
     container.addEventListener('touchcancel', cancelTouch);
     container.addEventListener('click', click, true);
+    window.addEventListener('keydown', key, true);
     window.addEventListener('blur', cancel);
     window.addEventListener('resize', cancel);
     document.addEventListener('visibilitychange', visibility);
@@ -137,6 +143,7 @@ export function useReaderGestures(options: Options) {
       container.removeEventListener('touchend', end);
       container.removeEventListener('touchcancel', cancelTouch);
       container.removeEventListener('click', click, true);
+      window.removeEventListener('keydown', key, true);
       window.removeEventListener('blur', cancel);
       window.removeEventListener('resize', cancel);
       document.removeEventListener('visibilitychange', visibility);

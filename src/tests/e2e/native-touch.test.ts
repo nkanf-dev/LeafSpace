@@ -9,7 +9,7 @@ async function swipe(session: CDPSession, region: Locator, dx: number, dy = 0) {
   const box = await region.boundingBox(); if (!box) throw new Error('Missing reader');
   const start = { id: 1, x: box.x + box.width / 2 - dx / 2, y: box.y + box.height / 2 - dy / 2 };
   await send(session, 'touchStart', [start]);
-  for (let i = 1; i <= 6; i++) await send(session, 'touchMove', [{ ...start, x: start.x + dx * i / 6, y: start.y + dy * i / 6 }]);
+  for (let i = 1; i <= 20; i++) await send(session, 'touchMove', [{ ...start, x: start.x + dx * i / 20, y: start.y + dy * i / 20 }]);
   await send(session, 'touchEnd', []);
 }
 async function pinch(session: CDPSession, region: Locator, factor: number, cancel = false) {
@@ -39,8 +39,9 @@ test('native touch: swipes turn, pinch zooms paper, native panning stays local, 
   await expect(page.getByRole('button', { name: '恢复适合宽度' })).toHaveText('200%');
   await expect.poll(() => region.evaluate(el => el.scrollWidth > el.clientWidth + 50)).toBe(true);
   await expect.poll(() => page.evaluate(() => visualViewport?.scale)).toBe(1);
+  const top = await region.evaluate(el => el.scrollTop);
   await swipe(session, region, 0, -140);
-  await expect.poll(() => region.evaluate(el => el.scrollTop)).toBeGreaterThan(50);
+  await expect.poll(() => region.evaluate(el => el.scrollTop)).toBeGreaterThan(top);
   const left = await region.evaluate(el => el.scrollLeft);
   await swipe(session, region, -100);
   await expect.poll(() => region.evaluate(el => el.scrollLeft)).toBeGreaterThan(left);
@@ -66,8 +67,9 @@ test('native touch targets the reference pane and browser zoom remains available
   await pinch(session, reference, 1.5);
   await expect(page.locator('[data-floating-window]').getByRole('button', { name: '恢复适合宽度' })).toHaveText('150%');
   await page.getByRole('button', { name: '回到书库' }).click();
+  await expect(page.getByRole('heading', { name: '页境阅读' })).toBeVisible();
   const before = await page.evaluate(() => visualViewport?.scale ?? 1);
-  await session.send('Input.synthesizePinchGesture', { x: 190, y: 420, scaleFactor: 1.5, gestureSourceType: 'touch', relativeSpeed: 400 });
+  await pinch(session, page.locator('body'), 1.5);
   await expect.poll(() => page.evaluate(() => visualViewport?.scale ?? 1)).toBeGreaterThan(before);
   await session.detach();
 });
