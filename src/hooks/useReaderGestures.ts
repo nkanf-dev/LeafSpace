@@ -38,11 +38,19 @@ export function useReaderGestures(options: Options) {
     let suppressClickUntil = 0;
     const clearPreview = () => { frame.style.transform = ''; frame.style.transformOrigin = ''; frame.style.willChange = ''; };
     const cancel = () => { clearPreview(); gesture = null; };
-    cancelRef.current = cancel;
+    const interrupt = () => {
+      const ongoing = !!gesture;
+      cancel();
+      if (ongoing) gesture = { kind: 'blocked' };
+    };
+    cancelRef.current = interrupt;
     const unavailable = () => !!container.closest('[inert]') || container.clientWidth === 0 || container.clientHeight === 0;
     const start = (event: TouchEvent) => {
       if (unavailable()) { cancel(); return; }
       const touches = Array.from(event.touches);
+      // A fresh single-contact start also recovers after an OS interruption that
+      // never delivered its final touchend. Surviving multi-touch stays blocked.
+      if (gesture?.kind === 'blocked' && touches.length === 1) gesture = null;
       // A second finger on a different pane must never zoom the first pane.
       if (touches.some(touch => !container.contains(touch.target as Node)) || touches.length > 2) { cancel(); gesture = { kind: 'blocked' }; return; }
       latest.current.onActivate();
@@ -118,13 +126,13 @@ export function useReaderGestures(options: Options) {
     };
     const cancelTouch = (event: TouchEvent) => { cancel(); if (event.touches.length) gesture = { kind: 'blocked' }; };
     const click = (event: MouseEvent) => { if (performance.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); } };
-    const visibility = () => { if (document.hidden) cancel(); };
+    const visibility = () => { if (document.hidden) interrupt(); };
     const key = (event: KeyboardEvent) => {
       if ((gesture?.kind === 'pinch' || gesture?.kind === 'swipe') && (event.key === 'Escape' || event.key === ' ')) {
-        event.preventDefault(); event.stopPropagation(); cancel();
+        event.preventDefault(); event.stopPropagation(); interrupt();
       }
     };
-    const observer = new MutationObserver(() => { if (gesture && unavailable()) cancel(); });
+    const observer = new MutationObserver(() => { if (gesture && unavailable()) interrupt(); });
     observer.observe(document.body, { attributes: true, attributeFilter: ['inert'], subtree: true });
     container.addEventListener('touchstart', start, { passive: false });
     container.addEventListener('touchmove', move, { passive: false });
@@ -132,8 +140,8 @@ export function useReaderGestures(options: Options) {
     container.addEventListener('touchcancel', cancelTouch);
     container.addEventListener('click', click, true);
     window.addEventListener('keydown', key, true);
-    window.addEventListener('blur', cancel);
-    window.addEventListener('resize', cancel);
+    window.addEventListener('blur', interrupt);
+    window.addEventListener('resize', interrupt);
     document.addEventListener('visibilitychange', visibility);
     return () => {
       cancel();
@@ -144,8 +152,8 @@ export function useReaderGestures(options: Options) {
       container.removeEventListener('touchcancel', cancelTouch);
       container.removeEventListener('click', click, true);
       window.removeEventListener('keydown', key, true);
-      window.removeEventListener('blur', cancel);
-      window.removeEventListener('resize', cancel);
+      window.removeEventListener('blur', interrupt);
+      window.removeEventListener('resize', interrupt);
       document.removeEventListener('visibilitychange', visibility);
     };
   }, [options.containerRef, options.frameRef]);

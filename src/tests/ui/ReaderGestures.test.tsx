@@ -52,6 +52,17 @@ describe('reader touch transactions', () => {
     event('touchstart', [touch(1, 300)]); event('touchend', [], [touch(1, 200)]);
     expect(onTurn).toHaveBeenCalledExactlyOnceWith(1);
   });
+  it('does not reuse a surviving finger after context interruption', () => {
+    const { event, touch, onZoom, onTurn, view } = setup();
+    event('touchstart', [touch(1, 100)]);
+    view.rerender(<Harness onTurn={onTurn} onZoom={onZoom} contextKey="book:2" />);
+    event('touchstart', [touch(1, 100), touch(2, 200)]);
+    event('touchmove', [touch(1, 50), touch(2, 250)]); event('touchend', []);
+    expect(onZoom).not.toHaveBeenCalled();
+    event('touchstart', [touch(1, 100), touch(2, 200)]);
+    event('touchmove', [touch(1, 50), touch(2, 250)]); event('touchend', []);
+    expect(onZoom).toHaveBeenCalledTimes(1);
+  });
   it('rejects contacts from a different pane', () => {
     const { event, touch, onZoom } = setup();
     event('touchstart', [touch(1, 100), touch(2, 200, 200, document.body)]);
