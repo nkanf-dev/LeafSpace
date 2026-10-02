@@ -47,6 +47,25 @@ test('welcome and reader remain usable at the project viewport', async ({ page }
     const state = await probe.evaluate(() => ({ documentFocused: document.hasFocus(), active: document.activeElement?.getAttribute('aria-label') }));
     nativeSequentialTab = state.active === 'Probe range';
     await testInfo.attach('webkit-app-independent-tab-probe', { body: JSON.stringify(state), contentType: 'application/json' });
+    const footer = await page.locator('footer').evaluate(el => el.outerHTML);
+    const styles = await page.evaluate(() => Array.from(document.styleSheets).map(sheet => Array.from(sheet.cssRules).map(rule => rule.cssText).join('\n')).join('\n'));
+    const variants: Record<string, unknown> = {};
+    for (const [name, css] of [['sameStyles', styles], ['nativeRange', styles + '.page-range { appearance:auto!important; -webkit-appearance:auto!important; }'], ['unstyled', '']]) {
+      await probe.setContent(`<style>${css}</style>${footer}`);
+      await probe.getByRole('button', { name: '下一页', exact: true }).focus();
+      await probe.keyboard.press('Shift+Tab');
+      variants[name] = await probe.evaluate(() => ({ focused: document.hasFocus(), active: document.activeElement?.outerHTML }));
+    }
+    await testInfo.attach('webkit-footer-isolation', { body: JSON.stringify(variants), contentType: 'application/json' });
+    await page.evaluate(() => {
+      const trace: unknown[] = [];
+      (window as typeof window & { __leafFocusTrace: unknown[] }).__leafFocusTrace = trace;
+      const record = (phase: string, event: Event) => trace.push({ phase, type: event.type, key: event instanceof KeyboardEvent ? event.key : undefined, prevented: event.defaultPrevented, target: event.target instanceof Element ? event.target.getAttribute('aria-label') : null, active: document.activeElement?.getAttribute('aria-label') });
+      document.addEventListener('keydown', event => record('capture', event), true);
+      window.addEventListener('keydown', event => record('bubble', event));
+      document.addEventListener('focusin', event => record('focus', event));
+      document.addEventListener('focusout', event => record('blur', event));
+    });
     await probe.close();
     await page.bringToFront();
   }
@@ -69,6 +88,7 @@ test('welcome and reader remain usable at the project viewport', async ({ page }
   } else {
     await nextPage.focus();
     await page.keyboard.press('Shift+Tab');
+    if (testInfo.project.name === 'webkit') await testInfo.attach('webkit-app-focus-events', { body: JSON.stringify(await page.evaluate(() => (window as typeof window & { __leafFocusTrace?: unknown[] }).__leafFocusTrace)), contentType: 'application/json' });
     await expect(timeline).toBeFocused();
     await page.keyboard.press('Tab');
   }
