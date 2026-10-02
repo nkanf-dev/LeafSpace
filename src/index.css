@@ -114,6 +114,9 @@ body.is-panning {
   outline-offset: 3px;
 }
 button { cursor: pointer; }
+/* Decorative SVGs must not become WebKit's pointer-based keyboard-navigation
+   starting node inside an already focused button. Keep the button as the hit target. */
+button svg { pointer-events: none; }
 button:disabled { cursor: not-allowed; }
 .page-range { appearance: none; height: 2rem; background: transparent; cursor: pointer; }
 .page-range::-webkit-slider-thumb { appearance: none; width: 16px; height: 20px; background: var(--surface); border: 2px solid #292524; border-radius: 2px; }
@@ -122,9 +125,12 @@ button:disabled { cursor: not-allowed; }
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
 @media (max-width: 639px) {
-  .workspace-split:has(.workspace-docked) { flex-direction: column; }
-  .workspace-split:has(.workspace-docked) .workspace-main,
-  .workspace-docked { width: 100% !important; height: 50%; }
+  .workspace-canvas [data-reader-pane][data-mobile-active="false"] { display: none !important; }
+  .workspace-canvas [data-reader-pane][data-mobile-active="true"] { width: 100% !important; height: 100% !important; min-height: 0; }
+  .workspace-canvas:has(.reader-floating-window[data-mobile-active="true"]) > .workspace-split,
+  .workspace-canvas:has(.reader-floating-window[data-mobile-active="true"]) > .workspace-grid { display: none; }
+  .workspace-grid { display: flex !important; }
+  .reader-floating-window[data-mobile-active="true"] { position: relative !important; left: 0 !important; top: 0 !important; flex: 1; border: 0; box-shadow: none; }
   .workspace-split > [role="separator"] { display: none; }
 }
 

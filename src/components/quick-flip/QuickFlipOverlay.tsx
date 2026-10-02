@@ -14,6 +14,7 @@ interface Props {
   currentPage: number;
   totalPages: number;
   onPageChange: (page: number) => void;
+  restoreFocusOnClose?: boolean;
 }
 
 const MAX_ALIGNMENT_ATTEMPTS = 18;
@@ -48,7 +49,7 @@ function buildSectionMarkers(totalPages: number): number[] {
   return Array.from(markers).sort((left, right) => left - right);
 }
 
-export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentPage, totalPages, onPageChange }) => {
+export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentPage, totalPages, onPageChange, restoreFocusOnClose = true }) => {
   const [selectedPage, setSelectedPage] = useState(currentPage);
   const [scrollAnchorPage, setScrollAnchorPage] = useState(currentPage);
   const [zoom, setZoom] = useState(1.0);
@@ -67,6 +68,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
   const documentId = useBookStore((state) => state.documentId);
   const hasThumbnailErrors = useThumbnailStore((state) => Object.values(state.entries).some((entry) => entry.status === 'error' && entry.key.startsWith(`${documentId}_`)));
   const heldPages = useHeldStore((state) => state.pages);
+  const heldNotice = useHeldStore(state => state.notice);
   const { holdPage, unholdPage } = useHeldStore.getState();
   const { openInNewWindow } = useWindowStore.getState();
   const heldPageNumbers = useMemo(
@@ -277,10 +279,10 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     if (!isVisible) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     overlayRef.current?.focus();
-    const stopHold = () => { setPressedDirection(null); holdStartTimeRef.current = null; };
+    const stopHold = () => { setPressedDirection(null); holdStartTimeRef.current = null; scheduleTimelineExit(); };
     window.addEventListener('blur', stopHold);
-    return () => { window.removeEventListener('blur', stopHold); previousFocus?.focus(); };
-  }, [isVisible]);
+    return () => { window.removeEventListener('blur', stopHold); if (restoreFocusOnClose) previousFocus?.focus(); };
+  }, [isVisible, restoreFocusOnClose, scheduleTimelineExit]);
 
   useEffect(() => {
     if (!isVisible || pressedDirection === null) {
@@ -367,7 +369,10 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
         return;
       }
 
-      if (e.key === 'Enter') {
+      if (e.key.toLowerCase() === 'n' || (e.key === 'Enter' && e.shiftKey)) {
+        e.preventDefault(); openInNewWindow(selectedPage); onClose(); return;
+      }
+      if (e.key === 'Enter' || e.key.toLowerCase() === 'j') {
         e.preventDefault();
         onPageChange(selectedPage);
         onClose();
@@ -375,14 +380,14 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if ((e.key === 'ArrowRight' && pressedDirection === 1) || (e.key === 'ArrowLeft' && pressedDirection === -1)) {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         e.preventDefault();
         setPressedDirection(null);
         holdStartTimeRef.current = null;
 
-        if (viewMode === 'timeline') {
-          scheduleTimelineExit();
-        }
+        // A keyup can arrive after timeline DOM commits but before this effect
+        // receives its new viewMode. Always schedule settling to avoid a stuck mode.
+        scheduleTimelineExit();
       }
     };
 
@@ -393,7 +398,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [clearExitTimelineTimer, holdPage, isVisible, onClose, onPageChange, pressedDirection, scheduleTimelineExit, selectedPage, stepSelection, unholdPage, viewMode]);
+  }, [clearExitTimelineTimer, holdPage, isVisible, onClose, onPageChange, openInNewWindow, pressedDirection, scheduleTimelineExit, selectedPage, stepSelection, unholdPage, viewMode]);
 
   useEffect(() => {
     if (!isVisible || viewMode !== 'thumbnails') return;
@@ -643,6 +648,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
           </div>
           {hasThumbnailErrors && <div className="mb-3 text-center text-xs text-stone-600">部分预览暂不可用，仍可按页码阅读。<button type="button" className="ml-2 underline underline-offset-4" onClick={() => void thumbnailService.ensureThumbnails(renderedPages, scaledFrameWidth)}>重试预览</button></div>}
           <div className="flex flex-wrap justify-center gap-2">
+            {heldNotice && <span role="status" className="text-xs text-amber-800">{heldNotice}</span>}
             <button type="button" className="min-h-11 border border-stone-400 px-4 text-sm text-stone-700" onClick={() => heldPageNumbers.includes(selectedPage) ? unholdPage(selectedPage) : void holdPage(selectedPage)}>{heldPageNumbers.includes(selectedPage) ? '取消夹页' : '夹住此页'}</button>
             <button type="button" className="min-h-11 border border-stone-400 px-4 text-sm text-stone-700" onClick={() => { openInNewWindow(selectedPage); onClose(); }}>打开参考窗</button>
             <button type="button" className="min-h-11 border border-stone-900 bg-stone-900 px-5 text-sm font-semibold text-white" onClick={() => { onPageChange(selectedPage); onClose(); }}>阅读此页</button>

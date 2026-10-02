@@ -161,11 +161,12 @@ test.describe('Held pages and comparison windows', () => {
     await expectMainPage(page, 3);
   });
 
-  test('removing a held page also removes its open comparison', async ({ page }) => {
+  test('removing a held page closes its comparison only when requested', async ({ page }) => {
     await holdCurrentPage(page, 1);
     await page.getByRole('button', { name: '打开第 1 页参考窗口', exact: true }).click();
     await expect(page.locator('[data-floating-window]')).toHaveCount(1);
     await page.getByRole('button', { name: '移除第 1 页夹页', exact: true }).click();
+    await page.getByRole('button', { name: '同时关闭', exact: true }).click();
     await expect(page.locator('[data-floating-window]')).toHaveCount(0);
     await expect(page.getByRole('button', { name: '打开第 1 页参考窗口', exact: true })).toHaveCount(0);
     await expectMainPage(page, 1);

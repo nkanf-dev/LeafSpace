@@ -3,7 +3,7 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import { useBookStore } from '../../stores/bookStore';
 import { useHeldStore } from '../../stores/heldStore';
 import { useWindowStore } from '../../stores/windowStore';
-import { MousePointer2, Hand, ZoomIn, ZoomOut } from 'lucide-react';
+import { MousePointer2, Hand, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
@@ -35,7 +35,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   const storedMode = currentWindow?.viewport?.mode ?? 'grab';
   const storedScale = isMain ? globalScale : (currentWindow?.viewport?.scale ?? 1);
   
-  const [scale, setScale] = useState(storedScale);
+  const scale = storedScale;
   const [pageWidth, setPageWidth] = useState(612);
   const [mode, setMode] = useState<InteractionMode>(storedMode);
   
@@ -48,18 +48,18 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   const panTarget = useRef({ scrollLeft: 0, scrollTop: 0 });
   const panAnimationFrame = useRef<number | null>(null);
   const lastPersistedScroll = useRef({ left: 0, top: 0 });
+  const renderReady = useRef(false);
+  const viewportRef = useRef(currentWindow?.viewport);
+  useLayoutEffect(() => { viewportRef.current = currentWindow?.viewport; }, [currentWindow?.viewport]);
   
   // 用于存储缩放中心的物理参考点
-  const zoomPivot = useRef<{ x: number, y: number, scrollX: number, scrollY: number, oldScale: number } | null>(null);
+  const zoomPivot = useRef<{ x: number, y: number, frameX: number, frameY: number, oldScale: number } | null>(null);
   const zoomCorrectionFrame = useRef<number | null>(null);
 
   useEffect(() => {
     setMode(storedMode);
   }, [storedMode]);
 
-  useEffect(() => {
-    setScale(storedScale);
-  }, [storedScale]);
 
   const persistViewport = useCallback((partial: Record<string, number | string>) => {
     if (!windowId) {
@@ -81,11 +81,10 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     const currentScale = isMain ? globalScale : scale;
     const nextScale = typeof updater === 'function' ? updater(currentScale) : updater;
     const clampedScale = Math.min(4, Math.max(0.1, nextScale));
+    if (Math.abs(clampedScale - currentScale) > 0.0001) renderReady.current = false;
 
     if (isMain) {
       setGlobalScale(clampedScale);
-    } else {
-      setScale(clampedScale);
     }
 
     persistViewport({ scale: clampedScale });
@@ -134,55 +133,52 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
       return;
     }
 
-    const { x, y, scrollX, scrollY, oldScale } = zoomPivot.current;
+    const { x, y, frameX, frameY, oldScale } = zoomPivot.current;
     const container = containerRef.current;
-    const mouseRelativeX = (x + scrollX) / oldScale;
-    const mouseRelativeY = (y + scrollY) / oldScale;
-
-    container.scrollLeft = Math.max(0, mouseRelativeX * scale - x);
-    container.scrollTop = Math.max(0, mouseRelativeY * scale - y);
+    const bounds = container.getBoundingClientRect();
+    const frame = contentFrameRef.current?.getBoundingClientRect();
+    if (!frame) return;
+    // Anchor the same point on the paper, including fit-width centering/padding.
+    container.scrollLeft += frame.left - bounds.left + ((x - frameX) / oldScale) * scale - x;
+    container.scrollTop += frame.top - bounds.top + ((y - frameY) / oldScale) * scale - y;
     syncPanTargetToContainer();
     zoomPivot.current = null;
   }, [scale, syncPanTargetToContainer]);
 
   useLayoutEffect(() => {
     updateContentAlignment();
-
-    if (!zoomPivot.current) {
-      return;
-    }
-
-    if (zoomCorrectionFrame.current !== null) {
-      window.cancelAnimationFrame(zoomCorrectionFrame.current);
-    }
-
-    zoomCorrectionFrame.current = window.requestAnimationFrame(() => {
-      applyZoomPivot();
-      zoomCorrectionFrame.current = null;
-    });
-  }, [applyZoomPivot, scale, updateContentAlignment]);
-
-  useLayoutEffect(() => {
-    updateContentAlignment();
   }, [activePage, scale, updateContentAlignment]);
 
-  useLayoutEffect(() => {
+  const restoreScroll = useCallback(() => {
     const container = containerRef.current;
+    if (!container || !viewportRef.current) return;
+    const left = viewportRef.current.scrollLeft ?? 0;
+    const top = viewportRef.current.scrollTop ?? 0;
+    container.scrollLeft = left;
+    container.scrollTop = top;
+    lastPersistedScroll.current = { left, top };
+    syncPanTargetToContainer();
+  }, [syncPanTargetToContainer]);
 
-    if (!container || !currentWindow?.viewport) {
-      return;
-    }
+  useLayoutEffect(() => {
+    renderReady.current = false;
+    restoreScroll();
+  }, [activePage, documentUrl, scale, pageWidth, restoreScroll]);
 
-    const targetLeft = currentWindow.viewport.scrollLeft ?? 0;
-    const targetTop = currentWindow.viewport.scrollTop ?? 0;
+  useLayoutEffect(() => {
+    if (renderReady.current && !zoomPivot.current) restoreScroll();
+  }, [currentWindow?.viewport, restoreScroll]);
 
-    if (Math.abs(container.scrollLeft - targetLeft) > 1 || Math.abs(container.scrollTop - targetTop) > 1) {
-      container.scrollLeft = targetLeft;
-      container.scrollTop = targetTop;
-      lastPersistedScroll.current = { left: targetLeft, top: targetTop };
-      syncPanTargetToContainer();
-    }
-  }, [activePage, currentWindow?.viewport, scale, syncPanTargetToContainer]);
+  const handleRenderSuccess = useCallback(() => {
+    updateContentAlignment();
+    window.requestAnimationFrame(() => {
+      const zooming = !!zoomPivot.current;
+      if (zooming) applyZoomPivot();
+      else restoreScroll();
+      renderReady.current = true;
+      if (zooming && containerRef.current) persistViewport({ scrollLeft: containerRef.current.scrollLeft, scrollTop: containerRef.current.scrollTop });
+    });
+  }, [applyZoomPivot, persistViewport, restoreScroll, updateContentAlignment]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -194,24 +190,14 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
 
     const observer = new ResizeObserver(() => {
       updateContentAlignment();
-
-      if (zoomPivot.current) {
-        if (zoomCorrectionFrame.current !== null) {
-          window.cancelAnimationFrame(zoomCorrectionFrame.current);
-        }
-
-        zoomCorrectionFrame.current = window.requestAnimationFrame(() => {
-          applyZoomPivot();
-          zoomCorrectionFrame.current = null;
-        });
-      }
+      if (!zoomPivot.current) restoreScroll();
     });
 
     observer.observe(container);
     observer.observe(contentFrame);
 
     return () => observer.disconnect();
-  }, [applyZoomPivot, updateContentAlignment]);
+  }, [applyZoomPivot, restoreScroll, updateContentAlignment]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -223,13 +209,14 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
         cancelPanAnimation();
         syncPanTargetToContainer();
         const rect = el.getBoundingClientRect();
+        const frame = contentFrameRef.current?.getBoundingClientRect();
         
         // 记录缩放前的快照
         zoomPivot.current = {
           x: e.clientX - rect.left,
           y: e.clientY - rect.top,
-          scrollX: el.scrollLeft,
-          scrollY: el.scrollTop,
+          frameX: (frame?.left ?? rect.left) - rect.left,
+          frameY: (frame?.top ?? rect.top) - rect.top,
           oldScale: scale
         };
 
@@ -311,7 +298,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   };
 
   const handleScroll = useCallback(() => {
-    if (!windowId || !containerRef.current) {
+    if (!windowId || !containerRef.current || !renderReady.current || containerRef.current.clientWidth === 0 || containerRef.current.clientHeight === 0) {
       return;
     }
 
@@ -371,6 +358,12 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     }
 
     // Only handle arrow keys and Enter, let other keys propagate normally
+    if (e.target instanceof Element && e.target.closest('button, input, textarea, select, a')) return;
+    if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      updateActivePage(e.key === 'Home' ? 1 : totalPages);
+      return;
+    }
     if (e.key === 'ArrowLeft') {
       e.preventDefault();
       updateActivePage(activePage - 1);
@@ -390,10 +383,10 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     }
 
     // Don't preventDefault for other keys to allow normal mouse operations
-  }, [activePage, holdPage, updateActivePage]);
+  }, [activePage, holdPage, totalPages, updateActivePage]);
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--surface)]">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--surface)]" onFocusCapture={handleViewportFocus} onPointerDownCapture={handleViewportFocus}>
       <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2 py-1 sm:px-4">
         <div className="flex items-center gap-3">
           <div className="flex bg-[#f0ede9] p-[2px]">
@@ -404,14 +397,18 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
               <Hand size={16} strokeWidth={2.5} />
             </button>
           </div>
+          <div className="flex items-center gap-1">
+            <button aria-label="此窗口上一页" className="p-1 text-stone-600 disabled:opacity-30" disabled={activePage <= 1} onClick={() => updateActivePage(activePage - 1)}><ChevronLeft size={16} /></button>
           <div className="text-xs font-medium text-stone-600">
             {isMain ? '主视角' : `参考 P.${activePage}`}
+          </div>
+            <button aria-label="此窗口下一页" className="p-1 text-stone-600 disabled:opacity-30" disabled={activePage >= totalPages} onClick={() => updateActivePage(activePage + 1)}><ChevronRight size={16} /></button>
           </div>
         </div>
 
         <div className="flex items-center gap-2 text-sm text-stone-500">
           <button aria-label="缩小" title="缩小" disabled={scale <= 0.1} className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9] disabled:opacity-40" onClick={() => updateScale((value) => value * 0.8)}><ZoomOut size={14} /></button>
-          <span className="text-[0.75rem] text-stone-700">{Math.round(scale * 100)}%</span>
+          <button aria-label="恢复适合宽度" title="恢复适合宽度" className="flex items-center gap-1 text-[0.75rem] text-stone-700" onClick={() => { zoomPivot.current = null; updateScale(1); persistViewport({ scale: 1, scrollLeft: 0, scrollTop: 0 }); if (containerRef.current) { containerRef.current.scrollLeft = 0; containerRef.current.scrollTop = 0; } }}><RotateCcw size={12} />{Math.round(scale * 100)}%</button>
           <button aria-label="放大" title="放大" disabled={scale >= 4} className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9] disabled:opacity-40" onClick={() => updateScale((value) => value * 1.2)}><ZoomIn size={14} /></button>
         </div>
       </div>
@@ -449,6 +446,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
                   scale={scale}
                   className="border border-[#e0ddd5] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.05),0_30px_100px_rgba(0,0,0,0.1)]"
                   renderTextLayer={true}
+                  onRenderSuccess={handleRenderSuccess}
                   loading={<div role="status" className="p-6 text-sm text-stone-500">正在渲染页面…</div>}
                   error={<div role="alert" className="p-6 text-sm text-red-800">这一页无法渲染，请试试其他页面或重新导入。</div>}
                 />

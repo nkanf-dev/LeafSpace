@@ -222,9 +222,10 @@ describe('QuickFlipOverlay', () => {
     fireEvent.keyDown(window, { key: 'ArrowRight' });
     act(() => vi.advanceTimersByTime(240));
     fireEvent.blur(window);
-    const positionAfterBlur = screen.getByText(/第 \d+ 页 \/ 共 100 页/).textContent;
+    const positionAfterBlur = screen.getByText(/第 \d+ 页 \/ 共 100 页/).textContent?.match(/第 (\d+) 页/)?.[1];
     act(() => vi.advanceTimersByTime(2_000));
-    expect(screen.getByText(/第 \d+ 页 \/ 共 100 页/)).toHaveTextContent(positionAfterBlur!);
+    expect(screen.queryByText('时间轴视图')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `选择第 ${positionAfterBlur} 页` })).toHaveAttribute('aria-pressed', 'true');
     expect(callbacks.onPageChange).not.toHaveBeenCalled();
   });
 

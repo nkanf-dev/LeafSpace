@@ -4,7 +4,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { thumbnailService } from '../services/ThumbnailService';
 import type { HeldPage } from '../types/domain';
 
+export const MAX_HELD_PAGES = 12;
+
 export interface HeldStoreState {
+  notice: string | null;
+  clearNotice: () => void;
   holdPage: (pageNumber: number) => Promise<void>;
   markHeldPageClosed: (pageNumber: number, windowId: string) => void;
   markHeldPageOpen: (pageNumber: number, windowId: string) => void;
@@ -17,6 +21,7 @@ export interface HeldStoreState {
 
 const initialState = {
   pages: [] as HeldPage[],
+  notice: null as string | null,
 };
 const pendingHoldPages = new Set<number>();
 
@@ -30,6 +35,7 @@ function sanitizeLinkedWindowIds(linkedWindowIds: string[]): string[] {
 
 export const useHeldStore = create<HeldStoreState>((set) => ({
   ...initialState,
+  clearNotice: () => set({ notice: null }),
   holdPage: async (pageNumber) => {
     if (pendingHoldPages.has(pageNumber)) {
       return;
@@ -41,6 +47,11 @@ export const useHeldStore = create<HeldStoreState>((set) => ({
       return;
     }
 
+    if (useHeldStore.getState().pages.length >= MAX_HELD_PAGES) {
+      set({ notice: '最多夹住 12 页。请先移除一张夹页，再保留新页。' });
+      return;
+    }
+    set({ notice: null });
     pendingHoldPages.add(pageNumber);
 
     const thumbnailKey = thumbnailService.getThumbnailKey(pageNumber);

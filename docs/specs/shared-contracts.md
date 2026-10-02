@@ -6,7 +6,7 @@
 
 ## 1. 架构原则
 
-1. `bookStore.currentPage` 是阅读位置的唯一真源。
+1. `bookStore.currentPage` 是主窗口阅读位置的唯一真源；参考窗口页码保存在各自的 `ReaderWindow.pageNumber`。全局导航通过 `windowStore.navigateActive` 跟随活动窗口。
 2. `heldStore` 只保存“夹页引用与元数据”，不保存窗口布局。
 3. `windowStore` 只保存“窗口展示状态”，不复制完整夹页数据。
 4. `workspaceStore` 只保存工作区级别元状态与快照恢复流程状态。
@@ -198,6 +198,8 @@ openInNewWindow(pageNumber: number): string
 openInSplit(pageNumber: number): string
 closeWindow(windowId: string): void
 setActiveWindow(windowId: string): void
+navigateActive(pageNumber: number): void
+setLayout(layout: 'floating' | 'split' | 'grid'): void
 swapWithMain(windowId: string): void
 ```
 
@@ -234,6 +236,9 @@ clearWorkspace(documentId: string): Promise<void>
 3. `Space` 只控制速翻，不要绑定其他含义。
 4. `Esc` 优先关闭最上层临时 UI。
 5. 主窗不可关闭。
+6. 新建窗口上限为 5（含主窗），新增夹页上限为 12；恢复旧现场不截断既有页面。
+7. 速翻会冻结进入时的窗口上下文，确认跳页回到该窗口；打开新窗口则激活并聚焦新窗。
+8. 小屏通过页面标签切换活动窗口，隐藏窗口不得把其滚动偏移覆盖为零。
 
 ---
 

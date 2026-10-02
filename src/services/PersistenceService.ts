@@ -3,7 +3,9 @@ import Dexie, { type Table } from 'dexie';
 import type { RecentBookEntry, WorkspaceSnapshot } from '../types/domain';
 
 interface PersistedBookRecord extends RecentBookEntry {
-  blob: Blob;
+  // Legacy records used Blob/File; bytes avoid WebKit file-backed Blob failures.
+  blob?: Blob;
+  bytes?: ArrayBuffer;
 }
 
 interface WorkspacePersistencePort {
@@ -107,7 +109,14 @@ export class PersistenceService {
       fileSize: input.fileSize,
       lastOpenedAt: now,
       lastSavedAt: existing?.lastSavedAt,
-      blob: input.file,
+      bytes: typeof input.file.arrayBuffer === 'function'
+        ? await input.file.arrayBuffer()
+        : await new Promise<ArrayBuffer>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as ArrayBuffer);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsArrayBuffer(input.file);
+        }),
     });
   }
 
@@ -120,8 +129,10 @@ export class PersistenceService {
 
     await this.port.updateBook(documentId, { lastOpenedAt: new Date().toISOString() });
 
-    return new File([record.blob], record.fileName, {
-      type: record.blob.type || 'application/pdf',
+    const data = record.bytes ?? record.blob;
+    if (!data) return null;
+    return new File([data], record.fileName, {
+      type: record.blob?.type || 'application/pdf',
       lastModified: Date.now(),
     });
   }

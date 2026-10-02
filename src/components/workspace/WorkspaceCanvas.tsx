@@ -39,7 +39,9 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
 
   useEffect(() => { windowsRef.current = windows; }, [windows]);
 
-  const dockedWindow = windows.find(w => w.dockMode === 'right-half');
+  const dockedWindows = windows.filter(w => w.type !== 'main' && w.dockMode !== 'none');
+  const dockedWindow = dockedWindows[0];
+  const useGrid = dockedWindows.length > 1 || dockedWindows.some(window => window.dockMode === 'grid');
   const mainWindow = windows.find(w => w.type === 'main');
   const floatingWindows = windows.filter(w => w.type !== 'main' && w.dockMode === 'none');
 
@@ -131,10 +133,24 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
   }, [dockedWindow, draggingId, resizingId, isResizingSplit, onWindowUpdate]);
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-[#edece9]" ref={workspaceRef}>
-      <div className="workspace-split flex h-full w-full min-w-0 bg-[var(--border)]">
+    <div className="workspace-canvas relative flex h-full w-full flex-col overflow-hidden bg-[#edece9]" ref={workspaceRef}>
+      {windows.length > 1 && <nav aria-label="打开的页面" className="workspace-tabs flex shrink-0 gap-1 overflow-x-auto border-b border-[var(--border)] bg-[var(--surface)] p-1 sm:hidden">
+        {windows.map(win => <button key={win.id} aria-pressed={win.isActive} className={`shrink-0 px-3 py-2 text-xs ${win.isActive ? 'bg-stone-900 text-white' : 'text-stone-600'}`} onClick={() => raiseWindow(win)}>{win.id === 'main' ? '主视角' : '参考'} · {win.pageNumber}</button>)}
+      </nav>}
+      {useGrid ? <div className="workspace-grid grid min-h-0 flex-1 gap-1 bg-[var(--border)]" style={{ gridTemplateColumns: `repeat(${dockedWindows.length >= 4 ? 3 : 2}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${dockedWindows.length >= 2 ? 2 : 1}, minmax(0, 1fr))` }}>
+        {[mainWindow, ...dockedWindows].filter((win): win is ReaderWindow => !!win).map(win => <div key={win.id} data-reader-pane data-mobile-active={win.isActive} data-window-id={win.id} style={{ gridRow: win.id === 'main' && (dockedWindows.length === 2 || dockedWindows.length >= 4) ? 'span 2' : undefined }} className={`flex min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--surface)] ${win.isActive ? 'ring-1 ring-inset ring-stone-700' : ''}`}>
+          {win.id !== 'main' && <div className="flex h-8 shrink-0 items-center gap-1 border-b border-[var(--border)] px-2 text-xs">
+            <button className="min-w-0 flex-1 truncate text-left text-stone-600" onClick={() => raiseWindow(win)}>参考 · 第 {win.pageNumber} 页</button>
+            <button className={surfaceIconButton} title="交换" onClick={() => swapWithMain(win.id)}><RefreshCcw size={14} /></button>
+            <button className={surfaceIconButton} title="浮动" onClick={() => onWindowUpdate({ ...win, dockMode: 'none', type: 'floating' })}><ExternalLink size={14} /></button>
+            <button className={dangerIconButton} title="关闭" onClick={() => onWindowClose(win.id)}><X size={14} /></button>
+          </div>}
+          <ReaderViewport isMain={win.id === 'main'} pageNumber={win.pageNumber} windowId={win.id} />
+        </div>)}
+      </div> : <div className="workspace-split flex min-h-0 flex-1 h-full w-full min-w-0 bg-[var(--border)]">
         {mainWindow && (
           <div
+            data-reader-pane data-mobile-active={mainWindow.isActive} data-window-id={mainWindow.id}
             className={`workspace-main min-h-0 min-w-0 flex flex-col overflow-hidden bg-[var(--surface)] ${mainWindow.isActive ? '' : ''}`}
             style={dockedWindow ? { width: `calc(${splitRatio * 100}% - 2px)` } : { width: '100%' }}
           >
@@ -160,8 +176,8 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
               <div className="absolute inset-y-0 left-1/2 w-4 -translate-x-1/2" />
               <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent group-hover:bg-stone-900" />
             </div>
-            <div className="workspace-docked min-h-0 min-w-0 flex flex-col overflow-hidden bg-[var(--surface)]" style={{ width: `calc(${(1 - splitRatio) * 100}% - 2px)` }}>
-            <div className="flex h-9 items-center gap-3 border-b border-[var(--border)] bg-[#f3f1ed] px-4">
+            <div data-reader-pane data-mobile-active={dockedWindow.isActive} data-window-id={dockedWindow.id} className="workspace-docked min-h-0 min-w-0 flex flex-col overflow-hidden bg-[var(--surface)]" style={{ width: `calc(${(1 - splitRatio) * 100}% - 2px)` }}>
+            <div className="flex h-9 shrink-0 items-center gap-3 border-b border-[var(--border)] bg-[#f3f1ed] px-4">
               <span className="bg-stone-900 px-1.5 py-0.5 text-[0.6rem] font-extrabold text-white">对比</span>
               <span className="min-w-0 flex-1 truncate text-[0.8rem] font-semibold text-stone-500">{dockedWindow.title}</span>
               <div className="flex items-center gap-1">
@@ -181,18 +197,18 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
             </div>
           </>
         )}
-      </div>
+      </div>}
 
       {floatingWindows.map(win => (
         <div
           key={win.id}
-          data-floating-window
+          data-floating-window data-reader-pane data-mobile-active={win.isActive} data-window-id={win.id}
           role="region" aria-label={`参考窗口，第 ${win.pageNumber} 页`}
           className={`reader-floating-window absolute flex flex-col overflow-hidden border bg-[var(--surface)] shadow-[0_20px_60px_rgba(0,0,0,0.15)] ${win.isActive ? 'border-stone-900 shadow-[0_30px_100px_rgba(0,0,0,0.25)]' : 'border-[var(--border)]'}`}
           style={{ zIndex: win.zIndex, left: `clamp(8px, ${win.x ?? 32}px, max(8px, 100% - min(${win.width ?? 420}px, 100% - 16px) - 8px))`, top: `clamp(8px, ${win.y ?? 32}px, max(8px, 100% - min(${win.height ?? 560}px, 100% - 16px) - 8px))`, width: `min(${win.width ?? 420}px, calc(100% - 16px))`, height: `min(${win.height ?? 560}px, calc(100% - 16px))` }}
           onMouseDown={() => !win.isActive && raiseWindow(win)}
         >
-          <div className="flex h-8 items-center gap-2 border-b border-[var(--border)] bg-[#f3f1ed] px-3" onMouseDown={(e) => handleMouseDown(e, win)}>
+          <div className="flex h-8 shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[#f3f1ed] px-3" onMouseDown={(e) => handleMouseDown(e, win)}>
             <span className="min-w-0 flex-1 truncate text-[0.7rem] font-bold text-stone-500">参考: P.{win.pageNumber}</span>
             <div className="flex items-center gap-1">
               <button
@@ -209,7 +225,7 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
           <div className="min-h-0 flex-1 overflow-hidden">
             <ReaderViewport pageNumber={win.pageNumber} windowId={win.id} />
           </div>
-          <div className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize bg-[linear-gradient(135deg,transparent_50%,var(--border)_50%)] hover:bg-[linear-gradient(135deg,transparent_50%,#1c1917_50%)]" onMouseDown={(e) => handleResizeStart(e, win)} />
+          <div className="absolute bottom-0 right-0 hidden h-4 w-4 cursor-nwse-resize sm:block bg-[linear-gradient(135deg,transparent_50%,var(--border)_50%)] hover:bg-[linear-gradient(135deg,transparent_50%,#1c1917_50%)]" onMouseDown={(e) => handleResizeStart(e, win)} />
         </div>
       ))}
     </div>
