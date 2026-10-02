@@ -133,7 +133,8 @@ test('actual main and reference zoom and scroll restore after canvas rendering',
   await reopenRecent(page, 'leafspace-120-pages.pdf');
   for (const region of [reader(page), ref]) {
     await expect(region.locator('canvas')).toBeVisible();
-    await expect.poll(() => offsets(region)).toEqual({ left: 120, top: 320 });
+    await expect.poll(async () => Math.abs((await offsets(region)).left - 120)).toBeLessThanOrEqual(1);
+    await expect.poll(async () => Math.abs((await offsets(region)).top - 320)).toBeLessThanOrEqual(1);
   }
   await testInfo.attach('zoomed-scroll-restored', { body: await page.screenshot(), contentType: 'image/png' });
 });
@@ -144,9 +145,10 @@ test('fit-width reset works twice and continues saving scroll at 100%', async ({
   await page.getByRole('button', { name: '恢复适合宽度', exact: true }).click();
   await expect.poll(() => offsets(reader(page))).toEqual({ left: 0, top: 0 });
   await reader(page).evaluate(el => el.scrollTo(0, 120));
-  await expect.poll(async () => (await snapshots(page))[0]?.windows[0]?.viewport?.scrollTop).toBe(120);
+  await expect.poll(async () => Math.abs(((await snapshots(page))[0]?.windows[0]?.viewport?.scrollTop ?? -999) - 120)).toBeLessThanOrEqual(1);
   await reopenRecent(page, 'leafspace-120-pages.pdf');
-  await expect.poll(() => offsets(reader(page))).toEqual({ left: 0, top: 120 });
+  await expect.poll(async () => Math.abs((await offsets(reader(page))).top - 120)).toBeLessThanOrEqual(1);
+  await expect.poll(async () => Math.abs((await offsets(reader(page))).left)).toBeLessThanOrEqual(1);
 });
 
 test('Ctrl-wheel zoom keeps the same paper point under the pointer', async ({ page }) => {

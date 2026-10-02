@@ -189,7 +189,7 @@ function App() {
         </div>}
 
         {documentId && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2 sm:px-6">
-          <button className={outlineButton} disabled={!ready} onClick={() => showQuickFlip(activePage)}><BookOpen size={16} />速翻<span className="hidden text-xs text-stone-400 sm:inline">Space</span></button>
+          <button className={outlineButton} disabled={!ready} onClick={() => showQuickFlip(activePage)}><BookOpen size={16} />速翻<span className="hidden text-xs text-stone-600 sm:inline">Space</span></button>
           <button className={outlineButton} disabled={!ready} onClick={() => void holdPage(activePage)}><BookmarkPlus size={16} />{heldPages.some((page) => page.pageNumber === activePage) ? '已夹住此页' : '夹住此页'}</button>
           <button ref={heldToggleRef} className={`${outlineButton} ml-auto lg:hidden`} aria-expanded={showHeldPages} aria-controls="held-pages-panel" onClick={() => showHeldPages ? closeHeldPanel() : setShowHeldPages(true)}><Layers size={16} />夹页 {heldPages.length}</button>
           <select aria-label="目录" value="" disabled={!ready || !book.toc.length} onChange={event => { if (event.target.value) jumpToPage(Number(event.target.value)); }} className="min-h-10 max-w-44 border border-[var(--border)] bg-transparent px-2 text-sm text-stone-600 disabled:opacity-60">

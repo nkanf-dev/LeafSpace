@@ -52,4 +52,16 @@ describe('persistent book retention', () => {
     expect(recent).toMatchObject({ documentId: 'book', fileName: 'book.pdf', totalPages: 2 });
     expect(recent).not.toHaveProperty('blob');
   });
+  it('stores portable ArrayBuffer bytes and still opens legacy Blob records', async () => {
+    const { port, service } = createService();
+    await service.saveBookAsset({ documentId: 'portable', file: new Blob(['%PDF-portable']), fileName: 'portable.pdf', fileSize: 13, totalPages: 1 });
+    const record = await port.books.get('portable');
+    expect(Object.prototype.toString.call(record?.bytes)).toBe("[object ArrayBuffer]");
+    expect(record).not.toHaveProperty('blob');
+    expect((await service.loadBookAsset('portable'))?.size).toBe(13);
+    await port.books.put({ documentId: 'legacy', blob: new Blob(['%PDF-legacy'], { type: 'application/pdf' }), fileName: 'legacy.pdf', fileSize: 11, totalPages: 1, lastOpenedAt: new Date().toISOString() });
+    expect((await service.loadBookAsset('legacy'))?.name).toBe('legacy.pdf');
+    expect((await service.listRecentBooks()).every(book => !('bytes' in book) && !('blob' in book))).toBe(true);
+  });
+
 });
