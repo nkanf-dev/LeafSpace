@@ -41,7 +41,11 @@ function App() {
     closeQuickFlip();
     // React removes background inertness during the commit. Restore focus after it,
     // using the opener captured before inert moved focus away from the reader.
-    window.requestAnimationFrame(() => quickFlipOpener.current?.focus());
+    window.requestAnimationFrame(() => {
+      const active = useWindowStore.getState().activeWindowId;
+      if (active && active !== quickFlipOrigin.current.windowId) document.querySelector<HTMLElement>(`[data-window-id="${active}"] [role="region"]`)?.focus();
+      else quickFlipOpener.current?.focus();
+    });
   }, [closeQuickFlip]);
   const heldToggleRef = useRef<HTMLButtonElement>(null);
   const heldBackRef = useRef<HTMLButtonElement>(null);

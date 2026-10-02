@@ -155,3 +155,31 @@ test('short landscape Quick Flip retains its preview and all primary actions', a
   await expect(dialog.getByRole('button', { name: '选择第 1 页', exact: true }).locator('img')).toBeInViewport({ ratio: 0.95 });
   await capture(page, testInfo, 'short-landscape-quick-flip');
 });
+
+test('mobile page tabs keep five references reachable and Quick Flip new-window focus survives dismissal', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/'); await importBook(page);
+  for (let number = 2; number <= 5; number++) {
+    await page.getByRole('button', { name: /^速翻/ }).click();
+    const preview = quickFlip(page);
+    await preview.getByRole('button', { name: '预览下一页', exact: true }).click();
+    await preview.getByRole('button', { name: '打开参考窗', exact: true }).click();
+    const ref = page.getByRole('region', { name: `参考阅读区，第 ${number} 页`, exact: true });
+    await expect(ref.locator('canvas')).toBeVisible();
+    await expect(page.getByRole('navigation', { name: '打开的页面' }).getByRole('button', { name: `参考 · ${number}`, exact: true })).toHaveAttribute('aria-pressed', 'true');
+  }
+  const tabs = page.getByRole('navigation', { name: '打开的页面' });
+  await expect(tabs.getByRole('button')).toHaveCount(5);
+  await tabs.getByRole('button', { name: '主视角 · 1', exact: true }).click();
+  await expect(reader(page).locator('canvas')).toBeVisible();
+  await tabs.getByRole('button', { name: '参考 · 3', exact: true }).click();
+  await expect(page.getByRole('region', { name: '参考阅读区，第 3 页', exact: true }).locator('canvas')).toBeVisible();
+  await capture(page, testInfo, 'mobile-five-window-switcher');
+  await page.getByRole('button', { name: '保存现场', exact: true }).click();
+  await expect.poll(async () => (await snapshots(page))[0]?.windows.length).toBe(5);
+  await page.reload();
+  await page.getByRole('button', { name: /leafspace-12-pages\.pdf/ }).click();
+  await expect(page.getByRole('region', { name: '参考阅读区，第 3 页', exact: true }).locator('canvas')).toBeVisible();
+  await expect(tabs.getByRole('button', { name: '参考 · 3', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expectNoDocumentOverflow(page);
+});

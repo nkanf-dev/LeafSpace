@@ -36,7 +36,7 @@ export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onReadPage
             <p>在阅读区按 ↑，或点击「夹住此页」。点击夹页回到该页；双击或点击对照按钮，打开参考窗口。</p>
           </div>
         ) : pages.map((page, index) => (
-          <div key={page.id} className={`relative mx-3 my-3 flex overflow-hidden border bg-white ${page.isOpen ? 'border-stone-700' : 'border-[var(--border)]'}`}>
+          <div key={page.id} onKeyDown={event => { if (event.key === 'Escape' && pendingRemoval === page.id) { event.preventDefault(); event.stopPropagation(); setPendingRemoval(null); } }} className={`relative mx-3 my-3 flex overflow-hidden border bg-white ${page.isOpen ? 'border-stone-700' : 'border-[var(--border)]'}`}>
             <button type="button" aria-label={`阅读第 ${page.pageNumber} 页`} onClick={(event) => {
               cancelPendingRead();
               if (event.detail === 0) (onReadPage ?? onPageClick)(page);
@@ -61,7 +61,7 @@ export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onReadPage
             {pendingRemoval === page.id && <div role="group" aria-label={`移除第 ${page.pageNumber} 页夹页选项`} className="absolute inset-0 flex flex-col justify-center gap-2 bg-[var(--surface)] p-3 text-xs">
               <p>这页仍在参考窗口中打开</p>
               <div className="flex flex-wrap gap-2">
-                <button className="border border-stone-500 px-2 py-1" onClick={() => { onRemovePage(page.id, false); setPendingRemoval(null); }}>保留窗口</button>
+                <button autoFocus className="border border-stone-500 px-2 py-1" onClick={() => { onRemovePage(page.id, false); setPendingRemoval(null); }}>保留窗口</button>
                 <button className="border border-stone-500 px-2 py-1" onClick={() => { onRemovePage(page.id, true); setPendingRemoval(null); }}>同时关闭</button>
                 <button className="px-1 py-1 underline" onClick={() => setPendingRemoval(null)}>取消</button>
               </div>

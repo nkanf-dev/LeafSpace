@@ -144,6 +144,8 @@ describe('ReaderViewport', () => {
     render(<ReaderViewport isMain windowId="main" />);
     expect(readerRegion().scrollLeft).toBe(120);
     expect(readerRegion().scrollTop).toBe(240);
+    Object.defineProperty(readerRegion(), 'clientWidth', { value: 400 });
+    Object.defineProperty(readerRegion(), 'clientHeight', { value: 600 });
     fireEvent.click(screen.getByRole('button', { name: 'Complete PDF render' }));
     await waitFor(() => {
       fireEvent.scroll(readerRegion(), { target: { scrollLeft: 150, scrollTop: 320 } });

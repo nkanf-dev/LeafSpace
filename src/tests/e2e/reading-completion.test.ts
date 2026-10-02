@@ -148,3 +148,19 @@ test('fit-width reset works twice and continues saving scroll at 100%', async ({
   await reopenRecent(page, 'leafspace-120-pages.pdf');
   await expect.poll(() => offsets(reader(page))).toEqual({ left: 0, top: 120 });
 });
+
+test('Ctrl-wheel zoom keeps the same paper point under the pointer', async ({ page }) => {
+  for (let i = 0; i < 5; i++) await page.getByRole('button', { name: '放大', exact: true }).click();
+  const region = reader(page), canvas = region.locator('canvas');
+  await expect.poll(() => region.evaluate(el => el.scrollWidth - el.clientWidth)).toBeGreaterThan(120);
+  await region.evaluate(el => el.scrollTo(100, 200));
+  const bounds = await region.boundingBox(); if (!bounds) throw new Error('Reader missing');
+  const point = { x: bounds.x + bounds.width * 0.5, y: bounds.y + bounds.height * 0.5 };
+  const logical = () => canvas.evaluate((el, point) => { const rect = el.getBoundingClientRect(); return { x: (point.x - rect.left) / rect.width, y: (point.y - rect.top) / rect.height, width: rect.width }; }, point);
+  const before = await logical();
+  await page.mouse.move(point.x, point.y); await page.keyboard.down('Control');
+  await page.mouse.wheel(0, -120); await page.keyboard.up('Control');
+  await expect.poll(async () => (await logical()).width).toBeGreaterThan(before.width);
+  await expect.poll(async () => Math.abs((await logical()).x - before.x)).toBeLessThan(0.03);
+  await expect.poll(async () => Math.abs((await logical()).y - before.y)).toBeLessThan(0.03);
+});

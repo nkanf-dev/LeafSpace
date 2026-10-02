@@ -161,4 +161,25 @@ describe('PDFService', () => {
     });
     await expect(new PDFService().loadDocument('https://example.com/broken.pdf')).rejects.toThrow('Invalid PDF payload');
   });
+  it('resolves nested outlines, named destinations and numeric destinations without failing on a broken item', async () => {
+    const doc = { ...metadata(),
+      getOutline: vi.fn().mockResolvedValue([
+        { title: 'Chapter', dest: [{ num: 4, gen: 0 }], items: [
+          { title: 'Nested', dest: 'named-target', items: [] },
+        ] },
+        { title: 'Broken', dest: 'broken-target', items: [] },
+        { title: 'Numeric', dest: [11], items: [] },
+      ]),
+      getDestination: vi.fn().mockImplementation((name: string) => name === 'named-target' ? [5] : Promise.reject(new Error('Invalid destination'))),
+      getPageIndex: vi.fn().mockResolvedValue(1),
+    };
+    getDocumentMock.mockReturnValue(loadedTask(doc));
+    const result = await new PDFService().loadDocument('https://example.com/outline.pdf');
+    expect(result.toc).toEqual([
+      { id: 'outline-0', title: 'Chapter', page: 2, level: 0 },
+      { id: 'outline-1', title: 'Nested', page: 6, level: 1 },
+      { id: 'outline-2', title: 'Numeric', page: 12, level: 0 },
+    ]);
+  });
+
 });

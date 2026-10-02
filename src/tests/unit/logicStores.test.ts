@@ -341,3 +341,71 @@ describe('logic store integration', () => {
   });
 
 });
+
+describe('reading capacity and active context', () => {
+  beforeEach(() => {
+    useBookStore.getState().setDocumentReady({ documentId: 'capacity', totalPages: 30 });
+    heldStore.getState().reset(); windowStore.getState().reset();
+  });
+
+  it('caps newly held pages at twelve while duplicates consume no extra space', async () => {
+    for (let page = 1; page <= 12; page++) await heldStore.getState().holdPage(page);
+    await heldStore.getState().holdPage(1);
+    expect(heldStore.getState().notice).toBeNull();
+    await heldStore.getState().holdPage(13);
+    expect(heldStore.getState().pages).toHaveLength(12);
+    expect(heldStore.getState().notice).toContain('12');
+    heldStore.getState().unholdPage(4);
+    await heldStore.getState().holdPage(13);
+    expect(heldStore.getState().pages.at(-1)?.pageNumber).toBe(13);
+    expect(heldStore.getState().notice).toBeNull();
+  });
+
+  it('caps new references without replacing an existing page, then permits one after closing', () => {
+    const ids = [2, 3, 4, 5].map(page => windowStore.getState().openInNewWindow(page));
+    windowStore.getState().openInNewWindow(6);
+    expect(windowStore.getState().windows.map(win => win.pageNumber)).toEqual([1, 2, 3, 4, 5]);
+    expect(windowStore.getState().notice).toContain('5');
+    windowStore.getState().closeWindow(ids[0]);
+    windowStore.getState().openInSplit(6);
+    expect(windowStore.getState().windows).toHaveLength(5);
+    expect(windowStore.getState().notice).toBeNull();
+  });
+
+  it('links newly held pages to already-visible windows immediately', async () => {
+    const id = windowStore.getState().openInNewWindow(1);
+    await heldStore.getState().holdPage(1);
+    expect(heldStore.getState().pages[0].linkedWindowIds).toEqual(['main', id]);
+    expect(heldStore.getState().pages[0].isOpen).toBe(true);
+  });
+
+  it('navigates only the active reference and resets its offsets for a new page', () => {
+    const id = windowStore.getState().openInNewWindow(8);
+    windowStore.getState().updateWindow(id, { viewport: { scale: 2, scrollTop: 300, scrollLeft: 90 } });
+    windowStore.getState().navigateActive(9);
+    expect(useBookStore.getState().currentPage).toBe(1);
+    expect(windowStore.getState().windows.find(win => win.id === id)).toMatchObject({ pageNumber: 9, viewport: { scale: 2, scrollTop: 0, scrollLeft: 0 } });
+  });
+
+  it('swaps the page viewport with the main window', () => {
+    useBookStore.getState().setScale(1.5);
+    windowStore.getState().updateWindow('main', { viewport: { scale: 1.5, scrollTop: 140 } });
+    const id = windowStore.getState().openInNewWindow(8);
+    windowStore.getState().updateWindow(id, { viewport: { scale: 2, scrollTop: 300 } });
+    windowStore.getState().swapWithMain(id);
+    expect(useBookStore.getState().scale).toBe(2);
+    expect(windowStore.getState().windows.find(win => win.id === 'main')?.viewport?.scrollTop).toBe(300);
+    expect(windowStore.getState().windows.find(win => win.id === id)?.viewport).toMatchObject({ scale: 1.5, scrollTop: 140 });
+  });
+
+  it('preserves legacy panes and selects a retained active window without dropping main', () => {
+    const windows = windowStore.getState().windows;
+    const legacy = Array.from({ length: 7 }, (_, index) => ({ ...windows[0], id: `legacy-${index}`, type: 'floating' as const, canClose: true, pageNumber: index + 2 }));
+    windowStore.getState().restoreWindows([...legacy, windows[0]], 'legacy-6');
+    expect(windowStore.getState().windows).toHaveLength(8);
+    expect(windowStore.getState().windows[0].id).toBe('main');
+    expect(windowStore.getState().windows.filter(win => win.isActive).map(win => win.id)).toEqual(['legacy-6']);
+    windowStore.getState().openInNewWindow(20);
+    expect(windowStore.getState().windows).toHaveLength(8);
+  });
+});

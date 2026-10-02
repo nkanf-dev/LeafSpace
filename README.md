@@ -48,7 +48,7 @@ LeafSpace 的设计重点不是增加尽可能多的功能点，而是让这些�
 
 ## Getting started
 
-目前已部署在 Cloudflare Pages，可以[在线体验](https://leafspace.kanglives.top)。
+目前已部署为 Cloudflare Workers 静态站点，可以[在线体验](https://leafspace.kanglives.top)。
 
 如果想本地运行：
 
@@ -97,7 +97,10 @@ npm run test:e2e
 
 - 点击「速翻」或在阅读区按 `Space` 预览其他页面；`Esc` 取消，`Enter` 或「阅读此页」确认跳转
 - 阅读区 `←` / `→` 翻页，`↑` 夹住当前页；鼠标滚轮和触摸滚动页面，`Ctrl` / `⌘` + 滚轮缩放
-- 夹页单击回到当前焦点阅读区；双击或点击对照图标打开参考窗口。主阅读窗口不可关闭
+- 夹页单击回到当前焦点阅读区；双击、Shift + 点击或对照图标打开参考窗口。主阅读窗口不可关闭
+- 最多新建 4 个参考窗口。可选择并排或平铺 2–5 页；手机通过「打开的页面」切换主视角与参考页
+- 速翻、目录、底部时间轴和页码输入跟随当前活动窗口。页码输入按 Enter 确认，Esc 取消
+- 最多新增到 12 张夹页，可通过上下移动按钮调整顺序；移除正在对照的夹页时可选择是否保留窗口
 - 点击左上角 LeafSpace 回到书库。切换书籍、回到书库前，会先保存当前现场
 - 页码、缩放、夹页与窗口布局在操作停止后自动保存。只有真正保存完成才显示「已保存到本机」
 - 最近列表展示 3 本书，但不会删除更早书籍的 PDF 或阅读现场；重新导入同一本 PDF 可恢复
@@ -111,10 +114,10 @@ npm run lint
 npm run build
 npm run test:unit
 npm run test:ui
-npx playwright install --with-deps chromium
+npx playwright install --with-deps chromium firefox webkit
 npm run test:e2e
 ```
 
-`Product quality` GitHub Actions runs the same checks and uploads Playwright reports, failure traces and real desktop/tablet/mobile screenshots as `leafspace-browser-evidence`. Browser fixtures are small, generated PDFs, never personal documents. The current browser matrix covers Chromium at 1440×900, 768×1024 and 390×844; it is not a claim of Safari/Firefox coverage.
+`Product quality` GitHub Actions runs the same checks and uploads Playwright reports, failure traces and real desktop/tablet/mobile screenshots as `leafspace-browser-evidence`. Browser fixtures are small, generated PDFs, never personal documents. The configured matrix runs Chromium, Firefox and WebKit at 1440×900, plus Chromium at 768×1024 and 390×844. The exact commit’s Actions report is authoritative; WebKit automation is not a claim of real iPhone/iPad coverage.
 
 See [browser coverage and evidence](src/tests/e2e/README.md) for scenarios and artifact interpretation.

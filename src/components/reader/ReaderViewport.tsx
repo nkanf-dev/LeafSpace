@@ -53,7 +53,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   useLayoutEffect(() => { viewportRef.current = currentWindow?.viewport; }, [currentWindow?.viewport]);
   
   // 用于存储缩放中心的物理参考点
-  const zoomPivot = useRef<{ x: number, y: number, scrollX: number, scrollY: number, oldScale: number } | null>(null);
+  const zoomPivot = useRef<{ x: number, y: number, frameX: number, frameY: number, oldScale: number } | null>(null);
   const zoomCorrectionFrame = useRef<number | null>(null);
 
   useEffect(() => {
@@ -133,33 +133,17 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
       return;
     }
 
-    const { x, y, scrollX, scrollY, oldScale } = zoomPivot.current;
+    const { x, y, frameX, frameY, oldScale } = zoomPivot.current;
     const container = containerRef.current;
-    const mouseRelativeX = (x + scrollX) / oldScale;
-    const mouseRelativeY = (y + scrollY) / oldScale;
-
-    container.scrollLeft = Math.max(0, mouseRelativeX * scale - x);
-    container.scrollTop = Math.max(0, mouseRelativeY * scale - y);
+    const bounds = container.getBoundingClientRect();
+    const frame = contentFrameRef.current?.getBoundingClientRect();
+    if (!frame) return;
+    // Anchor the same point on the paper, including fit-width centering/padding.
+    container.scrollLeft += frame.left - bounds.left + ((x - frameX) / oldScale) * scale - x;
+    container.scrollTop += frame.top - bounds.top + ((y - frameY) / oldScale) * scale - y;
     syncPanTargetToContainer();
     zoomPivot.current = null;
   }, [scale, syncPanTargetToContainer]);
-
-  useLayoutEffect(() => {
-    updateContentAlignment();
-
-    if (!zoomPivot.current) {
-      return;
-    }
-
-    if (zoomCorrectionFrame.current !== null) {
-      window.cancelAnimationFrame(zoomCorrectionFrame.current);
-    }
-
-    zoomCorrectionFrame.current = window.requestAnimationFrame(() => {
-      applyZoomPivot();
-      zoomCorrectionFrame.current = null;
-    });
-  }, [applyZoomPivot, scale, updateContentAlignment]);
 
   useLayoutEffect(() => {
     updateContentAlignment();
@@ -181,14 +165,20 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     restoreScroll();
   }, [activePage, documentUrl, scale, pageWidth, restoreScroll]);
 
+  useLayoutEffect(() => {
+    if (renderReady.current && !zoomPivot.current) restoreScroll();
+  }, [currentWindow?.viewport, restoreScroll]);
+
   const handleRenderSuccess = useCallback(() => {
     updateContentAlignment();
     window.requestAnimationFrame(() => {
-      if (zoomPivot.current) applyZoomPivot();
+      const zooming = !!zoomPivot.current;
+      if (zooming) applyZoomPivot();
       else restoreScroll();
       renderReady.current = true;
+      if (zooming && containerRef.current) persistViewport({ scrollLeft: containerRef.current.scrollLeft, scrollTop: containerRef.current.scrollTop });
     });
-  }, [applyZoomPivot, restoreScroll, updateContentAlignment]);
+  }, [applyZoomPivot, persistViewport, restoreScroll, updateContentAlignment]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -200,18 +190,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
 
     const observer = new ResizeObserver(() => {
       updateContentAlignment();
-      if (!renderReady.current) restoreScroll();
-
-      if (zoomPivot.current) {
-        if (zoomCorrectionFrame.current !== null) {
-          window.cancelAnimationFrame(zoomCorrectionFrame.current);
-        }
-
-        zoomCorrectionFrame.current = window.requestAnimationFrame(() => {
-          applyZoomPivot();
-          zoomCorrectionFrame.current = null;
-        });
-      }
+      if (!zoomPivot.current) restoreScroll();
     });
 
     observer.observe(container);
@@ -230,13 +209,14 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
         cancelPanAnimation();
         syncPanTargetToContainer();
         const rect = el.getBoundingClientRect();
+        const frame = contentFrameRef.current?.getBoundingClientRect();
         
         // 记录缩放前的快照
         zoomPivot.current = {
           x: e.clientX - rect.left,
           y: e.clientY - rect.top,
-          scrollX: el.scrollLeft,
-          scrollY: el.scrollTop,
+          frameX: (frame?.left ?? rect.left) - rect.left,
+          frameY: (frame?.top ?? rect.top) - rect.top,
           oldScale: scale
         };
 
@@ -318,7 +298,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   };
 
   const handleScroll = useCallback(() => {
-    if (!windowId || !containerRef.current || !renderReady.current) {
+    if (!windowId || !containerRef.current || !renderReady.current || containerRef.current.clientWidth === 0 || containerRef.current.clientHeight === 0) {
       return;
     }
 

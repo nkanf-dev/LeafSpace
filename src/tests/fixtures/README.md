@@ -4,6 +4,8 @@ These PDFs are generated in this repository and contain no personal, licensed, o
 
 - `leafspace-12-pages.pdf`: 12 portrait pages, distinctive page numbers and green bars
 - `leafspace-other-book.pdf`: a separate four-page document with a distinct fingerprint
+- `leafspace-120-pages.pdf`: long numbered book with a nested three-entry PDF outline
+- `scanned-document.test.ts` creates a genuine 106 MB raster-only PDF in a temporary test directory, then removes it; large binaries are not committed
 
 Regenerate deterministically with `node src/tests/fixtures/generate-pdf.mjs`.
 
