@@ -67,6 +67,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
   const documentId = useBookStore((state) => state.documentId);
   const hasThumbnailErrors = useThumbnailStore((state) => Object.values(state.entries).some((entry) => entry.status === 'error' && entry.key.startsWith(`${documentId}_`)));
   const heldPages = useHeldStore((state) => state.pages);
+  const heldNotice = useHeldStore(state => state.notice);
   const { holdPage, unholdPage } = useHeldStore.getState();
   const { openInNewWindow } = useWindowStore.getState();
   const heldPageNumbers = useMemo(
@@ -367,7 +368,10 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
         return;
       }
 
-      if (e.key === 'Enter') {
+      if (e.key.toLowerCase() === 'n' || (e.key === 'Enter' && e.shiftKey)) {
+        e.preventDefault(); openInNewWindow(selectedPage); onClose(); return;
+      }
+      if (e.key === 'Enter' || e.key.toLowerCase() === 'j') {
         e.preventDefault();
         onPageChange(selectedPage);
         onClose();
@@ -393,7 +397,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [clearExitTimelineTimer, holdPage, isVisible, onClose, onPageChange, pressedDirection, scheduleTimelineExit, selectedPage, stepSelection, unholdPage, viewMode]);
+  }, [clearExitTimelineTimer, holdPage, isVisible, onClose, onPageChange, openInNewWindow, pressedDirection, scheduleTimelineExit, selectedPage, stepSelection, unholdPage, viewMode]);
 
   useEffect(() => {
     if (!isVisible || viewMode !== 'thumbnails') return;
@@ -643,6 +647,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
           </div>
           {hasThumbnailErrors && <div className="mb-3 text-center text-xs text-stone-600">部分预览暂不可用，仍可按页码阅读。<button type="button" className="ml-2 underline underline-offset-4" onClick={() => void thumbnailService.ensureThumbnails(renderedPages, scaledFrameWidth)}>重试预览</button></div>}
           <div className="flex flex-wrap justify-center gap-2">
+            {heldNotice && <span role="status" className="text-xs text-amber-800">{heldNotice}</span>}
             <button type="button" className="min-h-11 border border-stone-400 px-4 text-sm text-stone-700" onClick={() => heldPageNumbers.includes(selectedPage) ? unholdPage(selectedPage) : void holdPage(selectedPage)}>{heldPageNumbers.includes(selectedPage) ? '取消夹页' : '夹住此页'}</button>
             <button type="button" className="min-h-11 border border-stone-400 px-4 text-sm text-stone-700" onClick={() => { openInNewWindow(selectedPage); onClose(); }}>打开参考窗</button>
             <button type="button" className="min-h-11 border border-stone-900 bg-stone-900 px-5 text-sm font-semibold text-white" onClick={() => { onPageChange(selectedPage); onClose(); }}>阅读此页</button>

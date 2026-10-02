@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReaderViewport } from '../../components/reader/ReaderViewport';
 import { useBookStore } from '../../stores/bookStore';
@@ -10,8 +10,8 @@ import { windowStore } from '../../stores/windowStore';
 vi.mock('react-pdf', () => ({
   pdfjs: { GlobalWorkerOptions: {}, version: 'test' },
   Document: ({ children }: ComponentProps<'div'>) => <div>{children}</div>,
-  Page: ({ pageNumber, scale }: { pageNumber: number; scale: number }) => (
-    <div data-testid="pdf-page" data-page={pageNumber} data-scale={scale} />
+  Page: ({ pageNumber, scale, onRenderSuccess }: { pageNumber: number; scale: number; onRenderSuccess: () => void }) => (
+    <div data-testid="pdf-page" data-page={pageNumber} data-scale={scale}><button onClick={onRenderSuccess}>Complete PDF render</button></div>
   ),
 }));
 vi.mock('../../services/ThumbnailService', () => ({
@@ -138,13 +138,17 @@ describe('ReaderViewport', () => {
     expect(useBookStore.getState().scale).toBeGreaterThan(1);
   });
 
-  it('restores and persists viewport scroll offsets', () => {
+  it('restores and persists viewport scroll offsets after PDF rendering', async () => {
     loadDocument();
     windowStore.getState().updateWindow('main', { viewport: { scrollLeft: 120, scrollTop: 240 } });
     render(<ReaderViewport isMain windowId="main" />);
     expect(readerRegion().scrollLeft).toBe(120);
     expect(readerRegion().scrollTop).toBe(240);
-    fireEvent.scroll(readerRegion(), { target: { scrollLeft: 150, scrollTop: 320 } });
+    fireEvent.click(screen.getByRole('button', { name: 'Complete PDF render' }));
+    await waitFor(() => {
+      fireEvent.scroll(readerRegion(), { target: { scrollLeft: 150, scrollTop: 320 } });
+      expect(windowStore.getState().windows[0].viewport?.scrollTop).toBe(320);
+    });
     expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 150, scrollTop: 320 });
   });
 

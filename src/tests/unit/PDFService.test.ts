@@ -67,7 +67,7 @@ describe('PDFService', () => {
     mockFetch(bytes);
     getDocumentMock.mockReturnValue(loadedTask());
     const service = new PDFService();
-    await expect(service.loadDocument('https://example.com/sample.pdf')).resolves.toEqual({ numPages: 12 });
+    await expect(service.loadDocument('https://example.com/sample.pdf')).resolves.toEqual({ numPages: 12, toc: [] });
     expect(service.hasLoadedDocument()).toBe(true);
     expect(service.getTotalPages()).toBe(12);
     expect(service.getDocumentFingerprint()).toBe('fingerprint-1');

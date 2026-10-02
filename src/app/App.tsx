@@ -18,8 +18,10 @@ function App() {
   const book = useBookStore();
   const { currentPage, totalPages, documentId, documentName, scale, status: bookStatus, loadDocument } = book;
   const { pages: heldPages, holdPage, unholdPage, reset: resetHeldPages } = useHeldStore();
-  const { windows, activeWindowId, updateWindow, closeWindow, openInNewWindow, setActiveWindow, reset: resetWindows } = useWindowStore();
+  const { windows, activeWindowId, navigateActive, setLayout, notice: windowNotice, clearNotice: clearWindowNotice, updateWindow, closeWindow, openInNewWindow, setActiveWindow, reset: resetWindows } = useWindowStore();
   const { isOpen: isQuickFlipVisible, close: closeQuickFlip, open: openQuickFlip } = useQuickFlipStore();
+  const activePage = windows.find(window => window.id === activeWindowId)?.pageNumber ?? currentPage;
+  const heldNotice = useHeldStore(state => state.notice);
   const workspace = useWorkspaceStore();
   const { hydrateRecentBooks, openRecentBook, recentBooks, registerCurrentBook, saveWorkspace, restoreWorkspace, status: workspaceStatus } = workspace;
   const [isHydratingDocument, setIsHydratingDocument] = useState(false);
@@ -29,8 +31,10 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importLock = useRef(false);
   const quickFlipOpener = useRef<HTMLElement | null>(null);
+  const quickFlipOrigin = useRef({ windowId: 'main', page: 1 });
   const showQuickFlip = useCallback((page: number) => {
     quickFlipOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    quickFlipOrigin.current = { windowId: useWindowStore.getState().activeWindowId ?? 'main', page };
     openQuickFlip(page);
   }, [openQuickFlip]);
   const dismissQuickFlip = useCallback(() => {
@@ -113,12 +117,12 @@ function App() {
       if (event.key === ' ' && ready) {
         event.preventDefault();
         if (isQuickFlipVisible) dismissQuickFlip();
-        else showQuickFlip(currentPage);
+        else showQuickFlip(activePage);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [ready, isQuickFlipVisible, currentPage, showQuickFlip, dismissQuickFlip, showHeldPages]);
+  }, [ready, isQuickFlipVisible, activePage, showQuickFlip, dismissQuickFlip, showHeldPages]);
 
   const returnToLibrary = async () => {
     if (!ready || importLock.current) return;
@@ -139,8 +143,7 @@ function App() {
   };
 
   const jumpToPage = (page: number) => {
-    book.setCurrentPage(page);
-    updateWindow('main', { pageNumber: page, title: `第 ${page} 页` });
+    navigateActive(page);
   };
   const error = workflowError || workspace.error || book.error;
   const snapshot = workspace.currentSnapshot;
@@ -182,12 +185,20 @@ function App() {
         </div>}
 
         {documentId && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2 sm:px-6">
-          <button className={outlineButton} disabled={!ready} onClick={() => showQuickFlip(currentPage)}><BookOpen size={16} />速翻<span className="hidden text-xs text-stone-400 sm:inline">Space</span></button>
-          <button className={outlineButton} disabled={!ready} onClick={() => void holdPage(currentPage)}><BookmarkPlus size={16} />{heldPages.some((page) => page.pageNumber === currentPage) ? '已夹住此页' : '夹住此页'}</button>
+          <button className={outlineButton} disabled={!ready} onClick={() => showQuickFlip(activePage)}><BookOpen size={16} />速翻<span className="hidden text-xs text-stone-400 sm:inline">Space</span></button>
+          <button className={outlineButton} disabled={!ready} onClick={() => void holdPage(activePage)}><BookmarkPlus size={16} />{heldPages.some((page) => page.pageNumber === activePage) ? '已夹住此页' : '夹住此页'}</button>
           <button ref={heldToggleRef} className={`${outlineButton} ml-auto lg:hidden`} aria-expanded={showHeldPages} aria-controls="held-pages-panel" onClick={() => showHeldPages ? closeHeldPanel() : setShowHeldPages(true)}><Layers size={16} />夹页 {heldPages.length}</button>
-          <span className="ml-auto hidden text-xs text-stone-500 lg:block">滚轮阅读 · Ctrl / ⌘ + 滚轮缩放</span>
+          <select aria-label="目录" value="" disabled={!ready || !book.toc.length} onChange={event => { if (event.target.value) jumpToPage(Number(event.target.value)); }} className="min-h-10 max-w-44 border border-[var(--border)] bg-transparent px-2 text-sm text-stone-600 disabled:opacity-60">
+            <option value="">{book.toc.length ? '目录 · 跳转章节' : '此 PDF 无目录'}</option>
+            {book.toc.map(item => <option key={item.id} value={item.page}>{'　'.repeat(Math.min(item.level, 4))}{item.title} · {item.page}</option>)}
+          </select>
+          {windows.length > 1 && <select aria-label="工作区布局" value={windows.some(win => win.dockMode === 'grid') ? 'grid' : windows.some(win => win.dockMode !== 'none') ? 'split' : 'floating'} onChange={event => setLayout(event.target.value as 'floating' | 'split' | 'grid')} className="hidden min-h-10 border border-[var(--border)] bg-transparent px-2 text-sm text-stone-600 sm:block">
+            <option value="floating">浮动窗口</option><option value="split">并排对照</option><option value="grid">平铺全部</option>
+          </select>}
+          <span className="ml-auto hidden text-xs text-stone-500 xl:block">{activeWindowId === 'main' ? '主视角' : '参考窗口'} · 第 {activePage} 页</span>
         </div>}
 
+        {(windowNotice || heldNotice) && <div role="status" className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-950"><span>{windowNotice || heldNotice}</span><button aria-label="关闭操作提示" className="p-2" onClick={() => { clearWindowNotice(); useHeldStore.getState().clearNotice(); }}><X size={16} /></button></div>}
         <main className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <section inert={showHeldPages} className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#edece9]">
             {documentId ? <WorkspaceCanvas windows={windows} onWindowUpdate={(win) => { updateWindow(win.id, win); if (win.isActive) setActiveWindow(win.id); }} onWindowClose={closeWindow} /> : (
@@ -221,17 +232,17 @@ function App() {
           </section>
           {documentId && <aside id="held-pages-panel" aria-label="夹页列表" className={`${showHeldPages ? 'absolute inset-0 z-30 flex' : 'hidden'} min-h-0 w-full shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface)] lg:static lg:flex lg:w-[280px]`}>
             <button ref={heldBackRef} className="min-h-11 border-b border-[var(--border)] px-5 text-left text-sm lg:hidden" onClick={closeHeldPanel}>← 返回阅读</button>
-            <HeldPagesPanel pages={heldPages} onReadPage={(page) => {
+            <HeldPagesPanel pages={heldPages} onReorder={useHeldStore.getState().reorderHeldPages} onReadPage={(page) => {
               const active = windows.find((win) => win.id === activeWindowId);
               if (!active || active.type === 'main') useWindowStore.getState().openInMain(page.pageNumber);
               else updateWindow(active.id, { pageNumber: page.pageNumber, title: `第 ${page.pageNumber} 页` });
               closeHeldPanel();
-            }} onPageClick={(page) => { openInNewWindow(page.pageNumber); closeHeldPanel(); }} onRemovePage={(id) => { const page = heldPages.find((candidate) => candidate.id === id); if (page) { useWindowStore.getState().closeWindowsForPage(page.pageNumber); unholdPage(page.pageNumber); } }} />
+            }} onPageClick={(page) => { openInNewWindow(page.pageNumber); closeHeldPanel(); }} onRemovePage={(id, closeReferences) => { const page = heldPages.find((candidate) => candidate.id === id); if (page) { if (closeReferences) useWindowStore.getState().closeWindowsForPage(page.pageNumber); unholdPage(page.pageNumber); } }} />
           </aside>}
         </main>
-        {documentId && <footer className="h-16 shrink-0 border-t border-[var(--border)]"><TimelineBar currentPage={currentPage} totalPages={totalPages} onPageClick={jumpToPage} markers={heldPages.map((page) => page.pageNumber)} /></footer>}
+        {documentId && <footer className="h-16 shrink-0 border-t border-[var(--border)]"><TimelineBar currentPage={activePage} chapters={book.toc} totalPages={totalPages} onPageClick={jumpToPage} markers={heldPages.map((page) => page.pageNumber)} /></footer>}
       </div>
-      {isQuickFlipVisible && ready && <QuickFlipOverlay isVisible onClose={dismissQuickFlip} currentPage={currentPage} totalPages={totalPages} onPageChange={jumpToPage} />}
+      {isQuickFlipVisible && ready && <QuickFlipOverlay isVisible onClose={dismissQuickFlip} currentPage={quickFlipOrigin.current.page} totalPages={totalPages} onPageChange={page => { updateWindow(quickFlipOrigin.current.windowId, { pageNumber: page }); setActiveWindow(quickFlipOrigin.current.windowId); }} />}
     </>
   );
 }

@@ -1,4 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import type { TOCItem } from '../types/domain';
 
 export type PDFDocumentSource = File | Blob | string;
 
@@ -32,7 +33,7 @@ export class PDFService {
     return new Uint8Array(await source.arrayBuffer());
   }
 
-  async loadDocument(source: PDFDocumentSource): Promise<{ numPages: number }> {
+  async loadDocument(source: PDFDocumentSource): Promise<{ numPages: number; toc?: TOCItem[] }> {
     const generation = ++this.loadGeneration;
     this.clearDocument();
     let loadingTask: pdfjsLib.PDFDocumentLoadingTask | undefined;
@@ -53,11 +54,30 @@ export class PDFService {
       if (generation !== this.loadGeneration) {
         throw new DOMException('文档加载已取消', 'AbortError');
       }
+      const toc: TOCItem[] = [];
+      // A broken or missing outline must never prevent reading the PDF.
+      try {
+        const walk = async (items: Awaited<ReturnType<typeof doc.getOutline>>, level = 0): Promise<void> => {
+          for (const item of items ?? []) {
+            if (toc.length >= 1000 || level > 20) break;
+            try {
+              const dest = typeof item.dest === 'string' ? await doc.getDestination(item.dest) : item.dest;
+              if (Array.isArray(dest) && dest[0] != null) {
+                const index = typeof dest[0] === 'number' ? dest[0] : await doc.getPageIndex(dest[0]);
+                if (Number.isInteger(index) && index >= 0 && index < doc.numPages) toc.push({ id: `outline-${toc.length}`, title: item.title, page: index + 1, level });
+              }
+            } catch { /* Keep valid siblings and children of broken destinations. */ }
+            await walk(item.items, level + 1);
+          }
+        };
+        await walk(await doc.getOutline());
+      } catch { /* PDFs without a readable outline still load normally. */ }
+      if (generation !== this.loadGeneration) throw new DOMException('文档加载已取消', 'AbortError');
       this.fingerprint = doc.fingerprints[0] || `doc_${crypto.randomUUID()}`;
       this.numPages = doc.numPages;
       this.documentData = cacheBytes;
       this.hasDoc = true;
-      return { numPages: doc.numPages };
+      return { numPages: doc.numPages, toc };
     } catch (error) {
       if (generation === this.loadGeneration) this.clearDocument();
       throw error;

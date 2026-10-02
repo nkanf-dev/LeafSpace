@@ -206,15 +206,15 @@ describe('logic store integration', () => {
     expect(windowStore.getState().activeWindowId).toBe('main');
   });
 
-  it('reuses one split pane and updates its held-page links', async () => {
+  it('keeps multiple comparison panes visible in a grid with their held-page links', async () => {
     useBookStore.getState().setDocumentReady({ documentId: 'split', totalPages: 20 });
     await Promise.all([4, 8].map(page => heldStore.getState().holdPage(page)));
     const firstId = windowStore.getState().openInSplit(4);
     const secondId = windowStore.getState().openInSplit(8);
-    expect(secondId).toBe(firstId);
-    expect(windowStore.getState().windows.filter(window => window.dockMode === 'right-half')).toHaveLength(1);
-    expect(heldStore.getState().pages.find(page => page.pageNumber === 4)?.linkedWindowIds).not.toContain(firstId);
-    expect(heldStore.getState().pages.find(page => page.pageNumber === 8)?.linkedWindowIds).toContain(firstId);
+    expect(secondId).not.toBe(firstId);
+    expect(windowStore.getState().windows.filter(window => window.dockMode === 'grid')).toHaveLength(2);
+    expect(heldStore.getState().pages.find(page => page.pageNumber === 4)?.linkedWindowIds).toContain(firstId);
+    expect(heldStore.getState().pages.find(page => page.pageNumber === 8)?.linkedWindowIds).toContain(secondId);
   });
 
   it('closes all references for a page and clears their held-page links', async () => {
