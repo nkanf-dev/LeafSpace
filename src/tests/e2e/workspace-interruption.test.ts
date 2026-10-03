@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
   await importBook(page);
 });
 
-test('ordinary mouse pan and inactive-reference drag survive their own reading-state updates', async ({ page }) => {
+test('ordinary mouse pan and inactive-reference drag survive their own reading-state updates', async ({ page }, info) => {
   const region = reader(page);
   for (let index = 0; index < 4; index++) await page.getByRole('button', { name: '放大', exact: true }).click();
   await expect.poll(() => region.evaluate(element => element.scrollWidth > element.clientWidth + 100)).toBe(true);
@@ -19,12 +19,18 @@ test('ordinary mouse pan and inactive-reference drag survive their own reading-s
   await holdCurrentPage(page, 1); await page.getByRole('button', { name: '打开第 1 页参考窗口', exact: true }).click();
   const floating = page.locator('[data-floating-window]'); await expect(floating.locator('canvas')).toBeVisible();
   await region.focus(); // Make the reference inactive before its drag starts.
+  await expect(floating).toHaveAttribute('data-mobile-active', 'false');
   const before = await floating.boundingBox(); const title = await floating.getByText('参考: P.1', { exact: true }).boundingBox();
   if (!before || !title) throw new Error('Missing floating reference');
+  const workspace = await floating.evaluate(element => ({ top: element.parentElement!.getBoundingClientRect().top, height: element.parentElement!.clientHeight }));
+  expect(before.y - workspace.top).toBeGreaterThan(42);
   await page.mouse.move(title.x + 20, title.y + 5); await page.mouse.down();
-  await page.mouse.move(title.x + 80, title.y + 35, { steps: 8 }); await page.mouse.up();
+  // Drag upward into free space. A downward drag at the initial bottom clamp
+  // legitimately tests the window boundary rather than continued input ownership.
+  await page.mouse.move(title.x + 80, title.y - 25, { steps: 8 }); await page.mouse.up();
   const after = await floating.boundingBox();
-  expect(after!.x - before.x).toBeGreaterThan(40); expect(after!.y - before.y).toBeGreaterThan(20);
+  await info.attach('ordinary-pan-and-inactive-drag', { body: JSON.stringify({ midPan: mid, before, after, workspace }), contentType: 'application/json' });
+  expect(after!.x - before.x).toBeGreaterThan(40); expect(before.y - after!.y).toBeGreaterThan(20);
   await expect(page.locator('[data-thumbnail-actions]')).toHaveCount(0);
 });
 

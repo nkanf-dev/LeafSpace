@@ -14,6 +14,7 @@ Playwright builds the deployable bundle, then starts Vite preview on `127.0.0.1:
 
 - **Shell/import/recovery:** empty library, real PDF.js text/canvas rendering, malformed and empty PDF recovery
 - **Reader:** page bounds, keyboard/range navigation, accessible zoom and mode controls, native keyboard button activation
+- **Mouse pan:** rapid native movement retains the latest target across saved intermediate scroll frames, settles at measured bounds, and is repeated five times without retries in WebKit. Deterministic UI tests also cover release-time settling, authoritative external restoration during pending paint, clamped targets and integer-rounded offsets
 - **Quick Flip:** selection without navigation, cancel/commit, repeat entry, held-arrow acceleration, Space autorepeat, focus containment/restore, holding and releasing preview pages
 - **Thumbnail actions:** six-project touch-pointer contracts for Quick Flip and held-page sheets, original-release suppression, first-Escape/Tab ownership, pressed-versus-selected page, linked-window removal and focus recovery, breakpoint/rotation recovery, 320px and short-landscape layouts, native Enter/Space buttons, stacking hit targets and scoped accessibility checks. Chromium mobile/tablet also use native CDP touch for hold/release, interruption, fresh actions and scrolling
 - **Workspace:** duplicate hold prevention, reference window opening/closing, independent navigation, dock/swap/float, remove-and-close, single-click focused-reader navigation, double-click comparison, Escape stack priority
