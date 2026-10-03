@@ -4,9 +4,16 @@ import type { Locator, Page } from '@playwright/test';
 async function dragStart(page: Page, slider: Locator, fraction: number) {
   const box = await slider.boundingBox();
   if (!box) throw new Error('Missing slider');
+  const destinationX = Math.round(box.x + 8 + (box.width - 16) * fraction);
+  const total = Number(await slider.getAttribute('max'));
+  const destinationPage = Math.round(1 + (destinationX - box.x - 8) / (box.width - 16) * (total - 1));
   await page.mouse.move(box.x + 8, box.y + box.height / 2);
   await page.mouse.down();
-  await page.mouse.move(box.x + 8 + (box.width - 16) * fraction, box.y + box.height / 2, { steps: 6 });
+  await page.mouse.move(destinationX, box.y + box.height / 2, { steps: 6 });
+  // WebKit may acknowledge native movement before its last pointermove reaches
+  // React. Observe that intended preview before sampling or cancelling it.
+  await expect(slider).toHaveValue(String(destinationPage));
+  await expect(slider).toHaveAttribute('aria-valuetext', /^预览：/);
 }
 
 test('timeline pointer drag previews without saving and commits on release; keyboard remains immediate', async ({ page }, info) => {
