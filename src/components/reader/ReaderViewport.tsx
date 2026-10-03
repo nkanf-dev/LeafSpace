@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
+import type { PDFPageProxy } from 'pdfjs-dist';
 import { useBookStore } from '../../stores/bookStore';
 import { useHeldStore } from '../../stores/heldStore';
 import { useWindowStore } from '../../stores/windowStore';
@@ -41,13 +42,16 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   
   const scale = storedScale;
   const [pageWidth, setPageWidth] = useState(612);
+  const [pageGeometry, setPageGeometry] = useState<{ documentUrl: string | null; page: number; ratio: number } | null>(null);
+  const paperRatio = pageGeometry?.documentUrl === documentUrl && pageGeometry.page === activePage ? pageGeometry.ratio : null;
+  const requestedScale = useRef(scale);
+  useLayoutEffect(() => { requestedScale.current = scale; }, [scale]);
   const [mode, setMode] = useState<InteractionMode>(storedMode);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const contentFrameRef = useRef<HTMLDivElement>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [shouldCenterHorizontally, setShouldCenterHorizontally] = useState(true);
-  const [shouldCenterVertically, setShouldCenterVertically] = useState(true);
   const startPos = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
   const panTarget = useRef({ scrollLeft: 0, scrollTop: 0 });
   const panAnimationFrame = useRef<number | null>(null);
@@ -80,17 +84,19 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   }, [updateWindow, windowId]);
 
   const updateScale = useCallback((updater: number | ((value: number) => number)) => {
-    const currentScale = isMain ? globalScale : scale;
+    const currentScale = requestedScale.current;
     const nextScale = typeof updater === 'function' ? updater(currentScale) : updater;
     const clampedScale = Math.min(4, Math.max(0.1, nextScale));
-    if (Math.abs(clampedScale - currentScale) > 0.0001) renderReady.current = false;
+    if (Math.abs(clampedScale - currentScale) <= 0.0001) return;
+    requestedScale.current = clampedScale;
+    renderReady.current = false;
 
     if (isMain) {
       setGlobalScale(clampedScale);
     }
 
     persistViewport({ scale: clampedScale });
-  }, [globalScale, isMain, persistViewport, scale, setGlobalScale]);
+  }, [isMain, persistViewport, setGlobalScale]);
 
   const cancelPanAnimation = useCallback(() => {
     if (panAnimationFrame.current !== null) {
@@ -119,15 +125,12 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     }
 
     const horizontalPadding = window.innerWidth < 640 ? 32 : 80;
-    const verticalPadding = window.innerWidth < 640 ? 48 : 120;
     // 100% is a paper-sized page that fits the current reader. Zoom stays relative
     // to that baseline so mobile and narrow comparison panes are readable by default.
     if (container.clientWidth > 0) setPageWidth(Math.min(612, Math.max(1, container.clientWidth - horizontalPadding)));
     const availableWidth = Math.max(0, container.clientWidth - horizontalPadding);
-    const availableHeight = Math.max(0, container.clientHeight - verticalPadding);
 
     setShouldCenterHorizontally(contentFrame.offsetWidth <= availableWidth + 2);
-    setShouldCenterVertically(contentFrame.offsetHeight <= availableHeight);
   }, []);
 
   const applyZoomPivot = useCallback(() => {
@@ -187,8 +190,17 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     if (zoomCorrectionFrame.current !== null) window.cancelAnimationFrame(zoomCorrectionFrame.current);
     zoomCorrectionFrame.current = null;
     renderReady.current = false;
-    restoreScroll();
-  }, [renderToken, restoreScroll]);
+  }, [renderToken]);
+
+  useLayoutEffect(() => {
+    // Reserve the new paper's geometry before React-PDF replaces its canvas.
+    // Correct synchronously, so the next input never anchors against stale pixels.
+    if (zoomPivot.current && paperRatio && containerRef.current?.clientWidth && containerRef.current.clientHeight) {
+      applyZoomPivot();
+      lastAppliedScroll.current = { left: containerRef.current.scrollLeft, top: containerRef.current.scrollTop };
+      persistViewport({ scrollLeft: containerRef.current.scrollLeft, scrollTop: containerRef.current.scrollTop });
+    } else restoreScroll();
+  }, [applyZoomPivot, paperRatio, persistViewport, renderToken, restoreScroll]);
 
   useLayoutEffect(() => {
     if (renderReady.current && !zoomPivot.current) restoreScroll();
@@ -240,37 +252,48 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     return () => observer.disconnect();
   }, [applyZoomPivot, restoreScroll, updateContentAlignment]);
 
+  const zoomAt = useCallback((factor: number, clientPoint?: { x: number; y: number }) => {
+    const container = containerRef.current;
+    if (!container) return;
+    const nextScale = Math.min(4, Math.max(0.1, requestedScale.current * factor));
+    if (Math.abs(nextScale - requestedScale.current) <= 0.0001) return;
+    cancelPanAnimation();
+    captureScrollIntent();
+    syncPanTargetToContainer();
+    const bounds = container.getBoundingClientRect();
+    const frame = contentFrameRef.current?.getBoundingClientRect();
+    if (!frame?.width || !frame.height || !container.clientWidth || !container.clientHeight) {
+      updateScale(nextScale);
+      return;
+    }
+    const x = clientPoint ? clientPoint.x - bounds.left : container.clientWidth / 2;
+    const y = clientPoint ? clientPoint.y - bounds.top : container.clientHeight / 2;
+    // Several wheel events can arrive in the same task, before React commits.
+    // Keep the original paper anchor and accumulate the requested scale.
+    if (!zoomPivot.current) zoomPivot.current = {
+      x, y, frameX: (frame?.left ?? bounds.left) - bounds.left,
+      frameY: (frame?.top ?? bounds.top) - bounds.top, oldScale: scale,
+    };
+    updateScale(nextScale);
+  }, [cancelPanAnimation, captureScrollIntent, scale, syncPanTargetToContainer, updateScale]);
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-
-    const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        cancelPanAnimation();
-        captureScrollIntent();
-        syncPanTargetToContainer();
-        const rect = el.getBoundingClientRect();
-        const frame = contentFrameRef.current?.getBoundingClientRect();
-        
-        // 记录缩放前的快照
-        zoomPivot.current = {
-          x: e.clientX - rect.left,
-          y: e.clientY - rect.top,
-          frameX: (frame?.left ?? rect.left) - rect.left,
-          frameY: (frame?.top ?? rect.top) - rect.top,
-          oldScale: scale
-        };
-
-        const factor = 1.15;
-        const delta = e.deltaY > 0 ? 1 / factor : factor;
-        updateScale((value) => value * delta);
-      }
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      zoomAt(event.deltaY > 0 ? 1 / 1.15 : 1.15, { x: event.clientX, y: event.clientY });
     };
-
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [cancelPanAnimation, captureScrollIntent, scale, syncPanTargetToContainer, updateScale]);
+  }, [zoomAt]);
+
+  const handlePageLoad = useCallback((page: PDFPageProxy) => {
+    if (currentRenderToken.current.documentUrl !== documentUrl || currentRenderToken.current.activePage !== activePage || page.pageNumber !== activePage) return;
+    const viewport = page.getViewport({ scale: 1 });
+    setPageGeometry({ documentUrl, page: activePage, ratio: viewport.height / viewport.width });
+  }, [activePage, documentUrl]);
 
   const animatePanToTarget = useCallback(function animate() {
     const container = containerRef.current;
@@ -454,9 +477,9 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
         </div>
 
         <div className="flex items-center gap-2 text-sm text-stone-500">
-          <button aria-label="缩小" title="缩小" disabled={scale <= 0.1} className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9] disabled:opacity-40" onClick={() => updateScale((value) => value * 0.8)}><ZoomOut size={14} /></button>
+          <button aria-label="缩小" title="缩小" disabled={scale <= 0.1} className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9] disabled:opacity-40" onClick={() => zoomAt(0.8)}><ZoomOut size={14} /></button>
           <button aria-label="恢复适合宽度" title="恢复适合宽度" className="flex items-center gap-1 text-[0.75rem] text-stone-700" onClick={() => { zoomPivot.current = null; updateScale(1); persistViewport({ scale: 1, scrollLeft: 0, scrollTop: 0 }); if (containerRef.current) { containerRef.current.scrollLeft = 0; containerRef.current.scrollTop = 0; } }}><RotateCcw size={12} />{Math.round(scale * 100)}%</button>
-          <button aria-label="放大" title="放大" disabled={scale >= 4} className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9] disabled:opacity-40" onClick={() => updateScale((value) => value * 1.2)}><ZoomIn size={14} /></button>
+          <button aria-label="放大" title="放大" disabled={scale >= 4} className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9] disabled:opacity-40" onClick={() => zoomAt(1.2)}><ZoomIn size={14} /></button>
         </div>
       </div>
 
@@ -477,9 +500,10 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
         style={{ cursor: mode === 'grab' ? (isPanning ? 'grabbing' : 'grab') : 'default', overflowAnchor: 'none', touchAction: mode === 'grab' && shouldCenterHorizontally ? 'pan-y' : 'pan-x pan-y' }}
       >
         <div
-          className={`flex min-h-full min-w-full px-4 py-6 sm:px-10 sm:py-[60px] ${shouldCenterHorizontally ? 'justify-center' : 'justify-start'} ${shouldCenterVertically ? 'items-center' : 'items-start'}`}
+          className="flex h-max min-h-full w-fit min-w-full shrink-0 px-4 py-6 sm:px-10 sm:py-[60px]"
         >
-          <div ref={contentFrameRef} className="w-max shrink-0">
+          <div ref={contentFrameRef} className="m-auto w-max shrink-0"
+            style={paperRatio ? { width: Math.floor(pageWidth * scale) + 2, height: Math.floor(pageWidth * scale * paperRatio) + 2 } : undefined}>
             {file ? (
               <Document
                 file={file}
@@ -493,6 +517,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
                   scale={scale}
                   className="border border-[#e0ddd5] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.05),0_30px_100px_rgba(0,0,0,0.1)]"
                   renderTextLayer={true}
+                  onLoadSuccess={handlePageLoad}
                   onRenderSuccess={handleRenderSuccess}
                   loading={<div role="status" className="p-6 text-sm text-stone-500">正在渲染页面…</div>}
                   error={<div role="alert" className="p-6 text-sm text-red-800">这一页无法渲染，请试试其他页面或重新导入。</div>}
