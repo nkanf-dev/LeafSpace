@@ -49,7 +49,20 @@ test.describe('Reader navigation and zoom', () => {
 });
 
 test.describe('Quick Flip selection and keyboard isolation', () => {
-  test('Escape cancels selection without moving the reader and returns focus', async ({ page }) => {
+  test('Escape cancels selection without moving the reader and returns focus', async ({ page }, info) => {
+    await page.evaluate(() => {
+      const events: unknown[] = [];
+      Object.assign(window, { quickFlipKeyEvents: events });
+      for (const type of ['keydown', 'keyup', 'blur', 'focus']) window.addEventListener(type, (event) => {
+        const key = event as KeyboardEvent;
+        const dialog = document.querySelector('[role="dialog"][aria-label="速翻视图"]');
+        events.push({ type, at: performance.now(), eventTime: event.timeStamp, key: key.key, repeat: key.repeat,
+          trusted: event.isTrusted, target: (event.target as Element)?.tagName,
+          selected: dialog?.querySelector('[aria-pressed="true"]')?.getAttribute('data-page'),
+          timeline: dialog?.textContent?.includes('时间轴视图') });
+      }, true);
+    });
+    try {
     await navigateTo(page, 3);
     await openQuickFlip(page);
     await page.keyboard.press('ArrowRight');
@@ -60,6 +73,9 @@ test.describe('Quick Flip selection and keyboard isolation', () => {
     await expect(quickFlip(page)).toHaveCount(0);
     await expectMainPage(page, 3);
     await expect(reader(page)).toBeFocused();
+    } finally {
+      await info.attach('native-key-events', { body: JSON.stringify(await page.evaluate(() => (window as unknown as { quickFlipKeyEvents: unknown[] }).quickFlipKeyEvents)), contentType: 'application/json' });
+    }
   });
 
   test('Enter commits a selected page and repeated openings reset to the actual reader page', async ({ page }) => {
