@@ -295,7 +295,7 @@ describe('ReaderViewport', () => {
     expect(region.scrollTop).toBeCloseTo(246.5);
   });
 
-  it('reserves scaled page geometry and anchors toolbar zoom before PDF paint completes', () => {
+  it('reserves paper geometry and anchors toolbar zoom before paint even when a scrollbar reduces the viewport', () => {
     loadDocument(); render(<ReaderViewport isMain windowId="main" />);
     const region = readerRegion(); mockScrollGeometry(region);
     act(() => resizeCallbacks.forEach(callback => callback()));
@@ -305,11 +305,12 @@ describe('ReaderViewport', () => {
     vi.spyOn(frame, 'getBoundingClientRect').mockImplementation(() => new DOMRect(40 - region.scrollLeft, 60 - region.scrollTop, parseFloat(frame.style.width), parseFloat(frame.style.height)));
     fireEvent.scroll(region, { target: { scrollLeft: 150, scrollTop: 300 } });
     const width = parseFloat(frame.style.width);
+    Object.defineProperty(region, 'clientHeight', { configurable: true, get: () => useBookStore.getState().scale > 1 ? 292 : 300 });
     fireEvent.click(screen.getByRole('button', { name: '放大' }));
     expect(parseFloat(frame.style.width)).toBe(Math.floor((width - 2) * 1.2) + 2);
     expect(region.scrollLeft).toBeCloseTo(212);
-    expect(region.scrollTop).toBeCloseTo(378);
-    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 212, scrollTop: 378 });
+    expect(region.scrollTop).toBeCloseTo(382);
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 212, scrollTop: 382 });
   });
 
   it('accumulates a wheel burst before React commits without replacing its original anchor', () => {

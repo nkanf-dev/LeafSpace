@@ -64,7 +64,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   useLayoutEffect(() => { viewportRef.current = currentWindow?.viewport; }, [currentWindow?.viewport]);
   
   // 用于存储缩放中心的物理参考点
-  const zoomPivot = useRef<{ x: number, y: number, frameX: number, frameY: number, oldScale: number } | null>(null);
+  const zoomPivot = useRef<{ x: number, y: number, frameX: number, frameY: number, oldScale: number; centered?: boolean } | null>(null);
   const zoomCorrectionFrame = useRef<number | null>(null);
 
   useEffect(() => {
@@ -138,14 +138,14 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
       return;
     }
 
-    const { x, y, frameX, frameY, oldScale } = zoomPivot.current;
+    const { x, y, frameX, frameY, oldScale, centered } = zoomPivot.current;
     const container = containerRef.current;
     const bounds = container.getBoundingClientRect();
     const frame = contentFrameRef.current?.getBoundingClientRect();
     if (!frame) return;
     // Anchor the same point on the paper, including fit-width centering/padding.
-    container.scrollLeft += frame.left - bounds.left + ((x - frameX) / oldScale) * scale - x;
-    container.scrollTop += frame.top - bounds.top + ((y - frameY) / oldScale) * scale - y;
+    container.scrollLeft += frame.left - bounds.left + ((x - frameX) / oldScale) * scale - (centered ? container.clientWidth / 2 : x);
+    container.scrollTop += frame.top - bounds.top + ((y - frameY) / oldScale) * scale - (centered ? container.clientHeight / 2 : y);
     syncPanTargetToContainer();
     zoomPivot.current = null;
   }, [scale, syncPanTargetToContainer]);
@@ -272,7 +272,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     // Keep the original paper anchor and accumulate the requested scale.
     if (!zoomPivot.current) zoomPivot.current = {
       x, y, frameX: (frame?.left ?? bounds.left) - bounds.left,
-      frameY: (frame?.top ?? bounds.top) - bounds.top, oldScale: scale,
+      frameY: (frame?.top ?? bounds.top) - bounds.top, oldScale: scale, centered: !clientPoint,
     };
     updateScale(nextScale);
   }, [cancelPanAnimation, captureScrollIntent, scale, syncPanTargetToContainer, updateScale]);
