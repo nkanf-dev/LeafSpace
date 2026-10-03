@@ -54,7 +54,18 @@ test.describe('Quick Flip selection and keyboard isolation', () => {
     await openQuickFlip(page);
     await page.keyboard.press('ArrowRight');
     await page.keyboard.press('ArrowRight');
-    await expect(quickFlip(page).getByRole('button', { name: '选择第 5 页', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    // Native keydown/keyup delivery is not atomic: a busy browser may legitimately
+    // interpret press() as a hold. This case tests cancellation, not tap duration.
+    await expect(quickFlip(page).getByText('时间轴视图', { exact: true })).toHaveCount(0);
+    const selected = quickFlip(page).getByRole('button', { pressed: true });
+    await expect(selected).toHaveCount(1);
+    await expect.poll(async () => Number(await selected.getAttribute('data-page'))).toBeGreaterThan(3);
+    const selectedPage = Number(await selected.getAttribute('data-page'));
+    // Outlast both hold-repeat and settling intervals so a lost release cannot
+    // pass just because the preview happened to reach its last page.
+    await page.waitForTimeout(360);
+    await expect(quickFlip(page).getByText('时间轴视图', { exact: true })).toHaveCount(0);
+    await expect(selected).toHaveAttribute('data-page', String(selectedPage));
     await expect(page.locator('header')).toContainText('第 3 页');
     await page.keyboard.press('Escape');
     await expect(quickFlip(page)).toHaveCount(0);

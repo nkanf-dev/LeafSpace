@@ -74,6 +74,19 @@ describe('QuickFlipOverlay', () => {
     expect(useBookStore.getState().currentPage).toBe(10);
   });
 
+  it('advances exactly once per synchronous released arrow tap and stops repeating', () => {
+    const callbacks = props();
+    render(<QuickFlipOverlay {...callbacks} />);
+    press('ArrowRight');
+    expect(pageButton(11)).toHaveAttribute('aria-pressed', 'true');
+    press('ArrowRight');
+    expect(pageButton(12)).toHaveAttribute('aria-pressed', 'true');
+    act(() => vi.advanceTimersByTime(360));
+    press('Enter');
+    expect(callbacks.onPageChange).toHaveBeenCalledExactlyOnceWith(12);
+    expect(screen.queryByText('时间轴视图')).not.toBeInTheDocument();
+  });
+
   it.each([['ArrowRight', 11], ['ArrowLeft', 9]] as const)(
     'previews %s and commits only on Enter', (key, target) => {
       const callbacks = props();
@@ -147,6 +160,10 @@ describe('QuickFlipOverlay', () => {
     act(() => vi.advanceTimersByTime(181));
     expect(screen.queryByText('时间轴视图')).not.toBeInTheDocument();
     expect(callbacks.onPageChange).not.toHaveBeenCalled();
+    const releasedPage = screen.getByRole('button', { pressed: true }).getAttribute('data-page');
+    act(() => vi.advanceTimersByTime(360));
+    expect(screen.queryByText('时间轴视图')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { pressed: true })).toHaveAttribute('data-page', releasedPage);
     press('Enter');
     expect(callbacks.onPageChange.mock.calls[0][0]).toBeGreaterThan(11);
   });
