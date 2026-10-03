@@ -490,7 +490,7 @@ describe('ReaderViewport', () => {
       y: (region.scrollTop + 150 - 61) / (parseFloat(frame.style.height) - 2) });
     const before = point();
     for (const name of ['放大', '缩小', '放大', '缩小']) {
-      fireEvent.click(screen.getByRole('button', { name, exact: true }));
+      fireEvent.click(screen.getByRole('button', { name }));
       const after = point();
       expect(Math.abs(after.x - before.x) * (parseFloat(frame.style.width) - 2)).toBeLessThanOrEqual(2);
       expect(Math.abs(after.y - before.y) * (parseFloat(frame.style.height) - 2)).toBeLessThanOrEqual(2);
