@@ -2,6 +2,7 @@ export interface ThumbnailLoadDocumentRequest {
   type: 'load-document';
   documentId: string;
   source: ArrayBuffer;
+  wasmUrl: string;
 }
 
 export interface ThumbnailRenderRequest {

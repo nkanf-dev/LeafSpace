@@ -1,0 +1,71 @@
+{
+  "fixtureOrigin": "Original synthetic colored rectangles; no external documents or images",
+  "encoder": {
+    "python": "3.12.14",
+    "pillow": "12.3.0",
+    "openjpeg": "2.5.4",
+    "format": "JPEG2000",
+    "irreversible": false
+  },
+  "generationRuntime": {
+    "node": "v24.19.0",
+    "zlib": "1.3.2.1-motley-3246f1b"
+  },
+  "jp2": {
+    "bytes": 4057,
+    "sha256": "446deb4eac95aea6de376b1bbe073ad0b84611d0b88631c77c3c21f528292bf5"
+  },
+  "decodedRGB": {
+    "width": 256,
+    "height": 256,
+    "channels": 3,
+    "sha256": "b6c7e4ce17ebc38da92bb7fdbec6475892cafbb6d793110ee795b83934890ca5"
+  },
+  "files": [
+    {
+      "name": "jpx-scan.pdf",
+      "bytes": 4736,
+      "sha256": "7636b130ce615dd5f08746b116ce2057dd701129799d74423ce1a9168f584403"
+    },
+    {
+      "name": "rgb-control.pdf",
+      "bytes": 1294,
+      "sha256": "7fa1de0aeed12f01131bcd97fd10198bbb88c8d51fe072ccdf2083950a07d3f4"
+    }
+  ],
+  "samples": [
+    {
+      "label": "red",
+      "xFraction": 0.5,
+      "yFraction": 0.25,
+      "expectedRGBA": [
+        210,
+        40,
+        40,
+        255
+      ]
+    },
+    {
+      "label": "green",
+      "xFraction": 0.5,
+      "yFraction": 0.75,
+      "expectedRGBA": [
+        20,
+        130,
+        40,
+        255
+      ]
+    },
+    {
+      "label": "white gap",
+      "xFraction": 0.5,
+      "yFraction": 0.5,
+      "expectedRGBA": [
+        255,
+        255,
+        255,
+        255
+      ]
+    }
+  ]
+}
