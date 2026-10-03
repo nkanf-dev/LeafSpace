@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react';
 import { BookOpen, BookmarkPlus, Layers, X } from 'lucide-react';
 import { WorkspaceCanvas } from '../components/workspace/WorkspaceCanvas';
 import { HeldPagesPanel } from '../components/held-pages/HeldPagesPanel';
@@ -44,7 +44,12 @@ function App() {
   const [showHeldPages, setShowHeldPages] = useState(false);
   const [replaceDocumentId, setReplaceDocumentId] = useState<string | null>(null);
   const saveButtonRef = useRef<HTMLButtonElement>(null);
+  const problemButtonRef = useRef<HTMLButtonElement>(null);
+  const problemRef = useRef<HTMLDivElement>(null);
+  const statusRef = useRef<HTMLSpanElement>(null);
+  const problemFocusRequest = useRef<{ error: string; opener: HTMLElement; previousFocus: Element | null } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importButtonRef = useRef<HTMLButtonElement>(null);
   const importLock = useRef(false);
   const quickFlipOpener = useRef<HTMLElement | null>(null);
   const quickFlipOrigin = useRef({ windowId: 'main', page: 1 });
@@ -109,7 +114,9 @@ function App() {
       const previousBook = useBookStore.getState();
       if (previousBook.documentId && previousBook.status === 'ready') {
         if (!await flushWorkspace(previousBook.documentId)) {
-          setWorkflowError('当前阅读现场未能保存，已暂停切换书籍。请重试保存后再导入，避免丢失刚才的更改。');
+          setWorkflowError(useWorkspaceStore.getState().unrestoredDocumentId === previousBook.documentId
+            ? '上次阅读现场尚未恢复，已暂停切换书籍。请先重试恢复，或点击「保存现场」确认替换。'
+            : '当前阅读现场未能保存，已暂停切换书籍。请重试保存后再导入，避免丢失刚才的更改。');
           return;
         }
       }
@@ -176,7 +183,7 @@ function App() {
         }
         return;
       }
-      if (event.target instanceof Element && event.target.closest('button, input, textarea, select, a, [contenteditable="true"], [role="dialog"]')) return;
+      if (event.target instanceof Element && event.target.closest('button, input, textarea, select, a, [contenteditable="true"], [role="dialog"], [role="alert"]')) return;
       if (event.key === ' ' && ready) {
         event.preventDefault();
         if (isQuickFlipVisible) dismissQuickFlip();
@@ -191,6 +198,8 @@ function App() {
     if (!ready || importLock.current) return;
     importLock.current = true;
     setIsHydratingDocument(true);
+    setWorkflowError(null);
+    setDismissedError(null);
     try {
       if (documentId && !await flushWorkspace(documentId)) return;
       closeQuickFlip();
@@ -208,6 +217,31 @@ function App() {
     navigateActive(page);
   };
   const error = workflowError || workspace.error || book.error;
+  const problemVisible = !!error && error !== dismissedError;
+  useLayoutEffect(() => {
+    const request = problemFocusRequest.current;
+    problemFocusRequest.current = null;
+    if (!request) return;
+    const active = document.activeElement;
+    if (active !== request.opener && active !== request.previousFocus
+      && !(active === document.body && !request.opener.isConnected)) return;
+    const fallback = statusRef.current?.textContent?.trim() ? statusRef.current : importButtonRef.current;
+    const target = error === request.error && problemVisible ? problemRef.current : !error ? fallback : null;
+    if (target?.isConnected && !target.closest('[inert]')) target.focus();
+  }, [error, problemVisible]);
+  const showProblem = () => {
+    if (!error || !problemButtonRef.current) return;
+    if (problemRef.current) {
+      if (!problemRef.current.closest('[inert]')) problemRef.current.focus();
+      return;
+    }
+    problemFocusRequest.current = { error, opener: problemButtonRef.current, previousFocus: document.activeElement };
+    setDismissedError(null);
+  };
+  const dismissProblem = () => {
+    setDismissedError(error);
+    problemButtonRef.current?.focus();
+  };
   const saved = isCurrentWorkspaceSaved(documentId);
   const retryStorage = () => {
     setReplaceDocumentId(null);
@@ -237,11 +271,14 @@ function App() {
           </div>
           <div className="order-3 flex w-full min-w-0 items-center justify-between gap-3 text-xs text-stone-500 sm:order-none sm:w-auto sm:flex-1 sm:px-4">
             <span className="truncate">{documentId ? `${documentName || '当前书籍'} · 第 ${currentPage} 页` : '让线性翻页，成为空间化阅读'}</span>
-            <span role="status" className="shrink-0">{workspaceStatus === 'saving' ? '正在保存…' : busy ? '正在打开…' : workspaceStatus === 'error' ? '保存或恢复遇到问题' : saved ? '已保存到本机' : ready ? '更改待保存' : ''}</span>
+            <div className="shrink-0">
+              <span ref={statusRef} role="status" aria-atomic="true" tabIndex={-1} className={error ? 'sr-only' : undefined}>{workspaceStatus === 'saving' ? '正在保存…' : busy ? '正在打开…' : workspaceStatus === 'error' || error ? '操作遇到问题' : saved ? '已保存到本机' : ready ? '更改待保存' : ''}</span>
+              {error && <button ref={problemButtonRef} type="button" aria-expanded={problemVisible} aria-controls={problemVisible ? 'workspace-problem-guidance' : undefined} onClick={showProblem} className="min-h-10 px-2 text-amber-900 underline underline-offset-4">查看问题</button>}
+            </div>
           </div>
           <div className="flex shrink-0 gap-2">
             <input aria-label="选择 PDF 文件" type="file" ref={fileInputRef} onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); }} accept=".pdf,application/pdf" className="hidden" disabled={busy} />
-            <button disabled={busy} onClick={() => fileInputRef.current?.click()} className={solidButton}>导入书籍</button>
+            <button ref={importButtonRef} disabled={busy} onClick={() => fileInputRef.current?.click()} className={solidButton}>导入书籍</button>
             {documentId && <button ref={saveButtonRef} onClick={requestSave} disabled={!ready || workspaceStatus === 'saving'} className={outlineButton}>保存现场</button>}
           </div>
         </header>
@@ -257,11 +294,11 @@ function App() {
           <button autoFocus aria-describedby="workspace-replacement-warning" className="min-h-10 px-3 py-2 underline" onClick={closeReplaceConfirmation}>取消覆盖</button>
         </div>}
 
-        {error && error !== dismissedError && <div role="alert" className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          <span className="min-w-0 flex-1">{workflowError || (workspace.errorOperation === 'register' ? 'PDF 尚未保存到本机，请保留原文件。可以继续阅读，但刷新或关闭页面可能丢失未保存的现场；请先重试保存。' : workspace.error ? `本机存储遇到问题：${workspace.error}` : '文件加载失败，请检查 PDF 后重新导入。')}</span>
+        {problemVisible && <div ref={problemRef} id="workspace-problem-guidance" role="alert" aria-label="问题详情" aria-describedby="workspace-problem-message" tabIndex={-1} className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <span id="workspace-problem-message" className="min-w-0 flex-1">{workflowError || (workspace.errorOperation === 'register' ? 'PDF 尚未保存到本机，请保留原文件。可以继续阅读，但刷新或关闭页面可能丢失未保存的现场；请先重试保存。' : workspace.error ? `本机存储遇到问题：${workspace.error}` : '文件加载失败，请检查 PDF 后重新导入。')}</span>
           {workspace.error && workspace.errorOperation !== 'open' && <button className="underline underline-offset-4" onClick={retryStorage} disabled={busy || workspaceStatus === 'saving'}>{workspace.errorOperation === 'restore' ? '重试恢复' : workspace.errorOperation === 'recent' ? '重试读取' : '重试保存'}</button>}
           <button className="underline underline-offset-4" onClick={() => fileInputRef.current?.click()} disabled={busy}>重新导入</button>
-          <button aria-label="关闭提示" className="p-2" onClick={() => setDismissedError(error)}><X size={18} /></button>
+          <button aria-label="关闭提示" className="p-2" onClick={dismissProblem}><X size={18} /></button>
         </div>}
 
         {documentId && <div inert={busy} className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2 sm:px-6">
