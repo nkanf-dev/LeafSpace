@@ -15,7 +15,7 @@ import {
 } from '../../stores/workspaceStore';
 
 vi.mock('../../services/ThumbnailService', () => ({
-  thumbnailService: {
+  thumbnailService: { activateDocument: vi.fn(), releaseDocument: vi.fn(),
     ensureThumbnail: vi.fn().mockResolvedValue(undefined),
     getThumbnailKey: vi.fn().mockImplementation((pageNumber: number) => `doc_${pageNumber}_240`),
   },

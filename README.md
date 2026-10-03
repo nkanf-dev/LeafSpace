@@ -139,3 +139,9 @@ See [browser coverage and evidence](src/tests/e2e/README.md) for scenarios and a
 - Two fingers on the same reader preview a paper zoom, then commit at release around the fingers' midpoint. Cancelled/interrupted gestures leave the saved scale unchanged. Reader zoom remains independent per window; browser pinch zoom is available outside the reader.
 - Drag the footer timeline to preview a page number without changing or saving the reading position. Release to jump, or move vertically away from the track and release to cancel (move back to resume). Escape/Space also cancels. Keyboard arrows and track clicks still navigate directly. Changing book/window or leaving the interaction cancels its temporary selection.
 - CI includes Chromium native CDP touch input at tablet/mobile viewports and cross-engine event-contract tests, including iPhone-sized WebKit emulation. This does not claim physical iOS hardware validation.
+
+### Document resource retirement
+
+Returning to the library or starting another book synchronously releases LeafSpace's cached PDF source and thumbnail URLs. Each opening owns a distinct thumbnail session, including same-book reopenings; stale callbacks cannot publish into the new session. Custom thumbnail workers terminate at retirement.
+
+Main-thread thumbnail fallback uses one parser slot. A retired parse/page operation must settle before safe PDF.js disposal; fresh fallback requests fail gracefully with the existing preview retry UI while that slot is occupied. This bounds accumulation, not cleanup duration. The reader's React-PDF ownership is unchanged; this does not claim to fix the independently reproduced PDF.js rejection when destroying a pending parse. No durable PDF or workspace records are deleted by resource cleanup.

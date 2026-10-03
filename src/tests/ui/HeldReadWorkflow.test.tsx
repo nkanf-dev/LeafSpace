@@ -13,7 +13,7 @@ vi.mock('../../components/quick-flip/QuickFlipOverlay', () => ({ QuickFlipOverla
 vi.mock('../../components/timeline/TimelineBar', () => ({ TimelineBar: () => null }));
 vi.mock('../../components/thumbnails/CachedThumbnail', () => ({ CachedThumbnail: () => null }));
 vi.mock('../../hooks/useWorkspaceAutoSave', () => ({ useWorkspaceAutoSave: vi.fn() }));
-vi.mock('../../services/ThumbnailService', () => ({ thumbnailService: { ensureThumbnail: vi.fn().mockResolvedValue(undefined), getThumbnailKey: (page: number) => `test_${page}` } }));
+vi.mock('../../services/ThumbnailService', () => ({ thumbnailService: { activateDocument: vi.fn(), releaseDocument: vi.fn(), ensureThumbnail: vi.fn().mockResolvedValue(undefined), getThumbnailKey: (page: number) => `test_${page}` } }));
 
 describe('held-page read intent', () => {
   beforeEach(async () => {

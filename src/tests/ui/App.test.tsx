@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../../app/App';
 import { useWorkspaceAutoSave } from '../../hooks/useWorkspaceAutoSave';
 import { PDFService } from '../../services/PDFService';
+import { thumbnailService } from '../../services/ThumbnailService';
 import { PersistenceService } from '../../services/PersistenceService';
 import { configureBookStoreDependencies, resetBookStoreDependencies, useBookStore } from '../../stores/bookStore';
 import { heldStore } from '../../stores/heldStore';
@@ -25,7 +26,7 @@ vi.mock('../../components/quick-flip/QuickFlipOverlay', () => ({ QuickFlipOverla
 vi.mock('../../components/timeline/TimelineBar', () => ({ TimelineBar: () => null }));
 vi.mock('../../hooks/useWorkspaceAutoSave', () => ({ useWorkspaceAutoSave: vi.fn() }));
 vi.mock('../../services/ThumbnailService', () => ({
-  thumbnailService: {
+  thumbnailService: { activateDocument: vi.fn(), releaseDocument: vi.fn(),
     ensureThumbnail: vi.fn().mockResolvedValue(undefined),
     getThumbnailKey: (page: number) => `test_${page}_240`,
   },
@@ -152,10 +153,13 @@ describe('App document workflows', () => {
     save.mockImplementationOnce(() => new Promise<void>(resolve => { finishSave = resolve; }));
     openExistingBook();
     render(<App />);
+    vi.mocked(thumbnailService.releaseDocument).mockClear();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '回到书库' })));
     expect(useBookStore.getState().documentId).toBe('old-book');
+    expect(thumbnailService.releaseDocument).not.toHaveBeenCalled();
     await act(async () => finishSave());
     expect(useBookStore.getState().documentId).toBeNull();
+    expect(thumbnailService.releaseDocument).toHaveBeenCalledOnce();
     expect(screen.getByRole('heading', { name: '页境阅读' })).toBeInTheDocument();
     expect(heldStore.getState().pages).toEqual([]);
   });
@@ -188,7 +192,9 @@ describe('App document workflows', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '保存现场' })));
     expect(workspaceStore.getState().errorOperation).toBe('register');
     expect(screen.queryByText('已保存到本机')).not.toBeInTheDocument();
+    vi.mocked(thumbnailService.releaseDocument).mockClear();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '回到书库' })));
+    expect(thumbnailService.releaseDocument).not.toHaveBeenCalled();
     expect(useBookStore.getState().documentId).toBe('new-book');
     expect(save).not.toHaveBeenCalled();
     expect(register).toHaveBeenCalledTimes(3);

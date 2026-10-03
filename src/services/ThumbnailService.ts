@@ -1,6 +1,4 @@
 import * as pdfjsLib from 'pdfjs-dist';
-import { pdfService } from './PDFService';
-import { bookStore } from '../stores/bookStore';
 import { thumbnailStore } from '../stores/thumbnailStore';
 import type { ThumbnailWorkerRequest, ThumbnailWorkerResponse } from './thumbnailProtocol';
 
@@ -12,406 +10,320 @@ if (typeof window !== 'undefined') {
   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
 }
 
-interface PendingThumbnailRequest {
+interface Completion {
   promise: Promise<void>;
-}
-
-interface PendingWorkerRender {
-  id: string;
-  promise: Promise<void>;
-  reject: (error: Error) => void;
   resolve: () => void;
+  reject: (error: unknown) => void;
 }
-
-interface PendingDocumentLoad {
+function completion(): Completion {
+  let resolve!: () => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+interface ThumbnailRequest extends Completion { key: string; pageNumber: number; width: number }
+interface WorkerRender extends Completion { id: string }
+interface DocumentSession {
   documentId: string;
-  promise: Promise<void>;
-  reject: (error: Error) => void;
-  resolve: () => void;
+  totalPages: number;
+  source: Uint8Array | null;
+  retired: boolean;
+  worker: Worker | null;
+  workerReady: boolean;
+  fallback: boolean;
+  loading: Completion | null;
+  requests: Map<string, ThumbnailRequest>;
+  renders: Map<string, WorkerRender>;
 }
-
-function isActiveThumbnailStatus(status: string | undefined): status is 'queued' | 'rendering' {
-  return status === 'queued' || status === 'rendering';
+interface FallbackJob extends Completion { request: ThumbnailRequest }
+interface FallbackSlot {
+  session: DocumentSession;
+  document: pdfjsLib.PDFDocumentProxy | null;
+  loadingTask: pdfjsLib.PDFDocumentLoadingTask | null;
+  renderTask: pdfjsLib.RenderTask | null;
+  jobs: FallbackJob[];
+  draining: boolean;
+  disposalError: unknown;
+  disposalFailed: boolean;
 }
+export class ThumbnailUnavailableError extends Error {
+  readonly code: 'retiring-document' | 'cleanup-failed';
+  constructor(code: 'retiring-document' | 'cleanup-failed') {
+    super('上一份文档的预览仍在释放，请稍后重试预览');
+    this.name = 'ThumbnailUnavailableError';
+    this.code = code;
+  }
+}
+export interface ThumbnailDocument { documentId: string; totalPages: number; source: Uint8Array }
 
 async function withTimeout<T>(promise: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('Thumbnail worker timeout')), THUMBNAIL_RENDER_TIMEOUT_MS);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
+    return await Promise.race([promise, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Thumbnail worker timeout')), THUMBNAIL_RENDER_TIMEOUT_MS);
+    })]);
+  } finally { clearTimeout(timer); }
 }
 
 export class ThumbnailService {
   static readonly shared = new ThumbnailService();
+  private session: DocumentSession | null = null;
+  // A retired main-thread parse retains this single slot until it settles. New
+  // sessions may use their worker, but cannot accumulate additional fallback PDFs.
+  private fallbackSlot: FallbackSlot | null = null;
 
-  private activeDocumentId: string | null = null;
-  private fallbackToMainThread = false;
-  private mainThreadDocument: pdfjsLib.PDFDocumentProxy | null = null;
-  private mainThreadDocumentId: string | null = null;
-  private mainThreadDocumentPromise: Promise<pdfjsLib.PDFDocumentProxy> | null = null;
-  private mainThreadLoadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null;
-  private pendingDocumentLoad: PendingDocumentLoad | null = null;
-  private pendingByKey = new Map<string, PendingThumbnailRequest>();
-  private pendingWorkerRenders = new Map<string, PendingWorkerRender>();
-  private worker: Worker | null = null;
-  private mainThreadRenderQueue: Promise<void> = Promise.resolve();
+  activateDocument({ documentId, totalPages, source }: ThumbnailDocument) {
+    this.releaseDocument();
+    this.session = {
+      documentId, totalPages, source, retired: false, worker: null, workerReady: false,
+      fallback: false, loading: null, requests: new Map(), renders: new Map(),
+    };
+  }
 
-  private ensureWorker(): Worker | null {
-    if (this.fallbackToMainThread || typeof Worker === 'undefined') {
-      return null;
+  releaseDocument() {
+    const session = this.session;
+    this.session = null;
+    if (session) {
+      session.retired = true;
+      session.source = null;
+      this.stopWorker(session, new Error('Thumbnail document retired'));
+      session.requests.forEach(request => request.resolve());
+      session.requests.clear();
+      const slot = this.fallbackSlot;
+      if (slot?.session === session) {
+        slot.jobs.splice(0).forEach(job => job.resolve());
+        try { slot.renderTask?.cancel(); }
+        catch { /* Keep observing the original render before attempting disposal. */ }
+        this.drainFallback(slot);
+      }
     }
+    thumbnailStore.getState().reset();
+  }
 
-    if (!this.worker) {
+  private current(session: DocumentSession): boolean { return this.session === session && !session.retired; }
+
+  private stopWorker(session: DocumentSession, error: Error) {
+    const worker = session.worker;
+    session.worker = null;
+    session.workerReady = false;
+    session.loading?.reject(error);
+    session.loading = null;
+    session.renders.forEach(pending => pending.reject(error));
+    session.renders.clear();
+    if (worker) {
+      worker.onmessage = null;
+      worker.onerror = null;
+      worker.terminate();
+    }
+  }
+
+  private ensureWorker(session: DocumentSession): Worker | null {
+    if (!this.current(session) || session.fallback || typeof Worker === 'undefined') return null;
+    if (!session.worker) {
+      let worker: Worker;
+      try { worker = new Worker(new URL('../workers/thumbnail.worker.ts', import.meta.url), { type: 'module' }); }
+      catch { session.fallback = true; return null; }
+      session.worker = worker;
+      worker.onmessage = (event: MessageEvent<ThumbnailWorkerResponse>) => {
+        if (this.current(session) && session.worker === worker) this.handleWorkerMessage(session, event.data);
+      };
+      worker.onerror = (event) => {
+        if (!this.current(session) || session.worker !== worker) return;
+        session.fallback = true;
+        this.stopWorker(session, new Error(event.message || 'Thumbnail worker failed'));
+      };
+    }
+    return session.worker;
+  }
+
+  private handleWorkerMessage(session: DocumentSession, message: ThumbnailWorkerResponse) {
+    if (message.type === 'document-ready' || message.type === 'document-error') {
+      if (message.documentId !== session.documentId || !session.loading) return;
+      const pending = session.loading;
+      session.loading = null;
+      if (message.type === 'document-ready') { session.workerReady = true; pending.resolve(); }
+      else pending.reject(new Error(message.error));
+      return;
+    }
+    const pending = session.renders.get(message.key);
+    if (!pending || pending.id !== message.id) return;
+    session.renders.delete(message.key);
+    if (message.type === 'error') { pending.reject(new Error(message.error)); return; }
+    if (session.requests.has(message.key)) this.publish(session, message.key, message.blob, message.width, message.height);
+    pending.resolve();
+  }
+
+  private ensureWorkerDocument(session: DocumentSession, worker: Worker): Promise<void> {
+    if (session.workerReady) return Promise.resolve();
+    if (session.loading) return session.loading.promise;
+    const pending = completion();
+    session.loading = pending;
+    const sourceCopy = Uint8Array.from(session.source!);
+    try {
+      worker.postMessage({ documentId: session.documentId, source: sourceCopy.buffer, type: 'load-document' } satisfies ThumbnailWorkerRequest, [sourceCopy.buffer]);
+    } catch (error) { pending.reject(error); }
+    return pending.promise;
+  }
+
+  private async render(session: DocumentSession, request: ThumbnailRequest) {
+    if (!this.current(session)) return;
+    const worker = this.ensureWorker(session);
+    if (worker) {
       try {
-        this.worker = new Worker(new URL('../workers/thumbnail.worker.ts', import.meta.url), { type: 'module' });
-      } catch {
-        this.fallbackToMainThread = true;
-        return null;
+        await withTimeout(this.ensureWorkerDocument(session, worker));
+        if (!this.current(session)) return;
+        if (session.worker !== worker || session.fallback) throw new Error('Thumbnail worker retired before render');
+        const pending = { ...completion(), id: crypto.randomUUID() };
+        session.renders.set(request.key, pending);
+        try {
+          worker.postMessage({ documentId: session.documentId, id: pending.id, key: request.key,
+            maxWidth: request.width, pageNumber: request.pageNumber, type: 'render' } satisfies ThumbnailWorkerRequest);
+        } catch (error) { pending.reject(error); }
+        await withTimeout(pending.promise);
+        return;
+      } catch (error) {
+        if (!this.current(session)) return;
+        if (session.worker === worker) {
+          session.fallback = true;
+          this.stopWorker(session, error instanceof Error ? error : new Error('Thumbnail worker failed'));
+        }
       }
-      this.worker.onmessage = (event: MessageEvent<ThumbnailWorkerResponse>) => {
-        this.handleWorkerMessage(event.data);
-      };
-      this.worker.onerror = (event) => {
-        this.disableWorker(new Error(event.message || 'Thumbnail worker failed'));
-      };
     }
-
-    return this.worker;
+    if (this.current(session)) await this.enqueueFallback(session, request);
   }
 
-  private disableWorker(error: Error) {
-    this.fallbackToMainThread = true;
-    this.activeDocumentId = null;
-    this.pendingDocumentLoad?.reject(error);
-    this.pendingDocumentLoad = null;
-    this.pendingWorkerRenders.forEach((pending) => pending.reject(error));
-    this.pendingWorkerRenders.clear();
-    this.worker?.terminate();
-    this.worker = null;
+  private enqueueFallback(session: DocumentSession, request: ThumbnailRequest): Promise<void> {
+    let slot = this.fallbackSlot;
+    if (slot && (slot.session !== session || slot.disposalFailed)) {
+      return Promise.reject(new ThumbnailUnavailableError(slot.disposalFailed ? 'cleanup-failed' : 'retiring-document'));
+    }
+    if (!slot) {
+      slot = { session, document: null, loadingTask: null, renderTask: null, jobs: [], draining: false, disposalError: null, disposalFailed: false };
+      this.fallbackSlot = slot;
+    }
+    const job = { ...completion(), request };
+    slot.jobs.push(job);
+    this.drainFallback(slot);
+    return job.promise;
   }
 
-  private async disposeMainThreadDocument() {
-    const loadingTask = this.mainThreadLoadingTask;
-    const document = this.mainThreadDocument;
-    this.mainThreadDocument = null;
-    this.mainThreadLoadingTask = null;
-    this.mainThreadDocumentId = null;
-    this.mainThreadDocumentPromise = null;
+  private drainFallback(slot: FallbackSlot) {
+    if (slot.draining || slot.disposalFailed) return;
+    slot.draining = true;
+    void (async () => {
+      try {
+        while (slot.jobs.length && this.current(slot.session)) {
+          const job = slot.jobs.shift()!;
+          try { await this.renderFallback(slot, job.request); job.resolve(); }
+          catch (error) { job.reject(error); }
+          if (slot.disposalFailed) break;
+        }
+      } finally {
+        if (slot.session.retired) {
+          if (!slot.disposalFailed) {
+            try { await this.disposeFallback(slot); }
+            catch (error) { slot.disposalError = error; slot.disposalFailed = true; }
+          }
+          if (!slot.disposalFailed && this.fallbackSlot === slot) this.fallbackSlot = null;
+        }
+        slot.draining = false;
+        if (slot.disposalFailed) slot.jobs.splice(0).forEach(job => job.reject(slot.disposalError));
+      }
+    })();
+  }
+
+  private async disposeFallback(slot: FallbackSlot) {
+    // Only called after the loading promise and the active page/render operation
+    // have settled. Destroying an in-flight PDF.js parse can detach a rejection.
+    await slot.loadingTask?.destroy();
+    slot.loadingTask = null;
+    slot.document = null;
+  }
+
+  private async renderFallback(slot: FallbackSlot, request: ThumbnailRequest) {
+    const session = slot.session;
+    if (!this.current(session)) return;
+    if (!slot.document) {
+      slot.loadingTask = pdfjsLib.getDocument({ data: Uint8Array.from(session.source!), isEvalSupported: false, useWorkerFetch: false });
+      try { slot.document = await slot.loadingTask.promise; }
+      catch (error) {
+        try { await this.disposeFallback(slot); }
+        catch (cleanupError) { slot.disposalError = cleanupError; slot.disposalFailed = true; }
+        throw error;
+      }
+    }
+    if (!this.current(session)) return;
+    const page = await slot.document.getPage(request.pageNumber);
+    let canvas: HTMLCanvasElement | null = null;
     try {
-      if (loadingTask) await loadingTask.destroy();
-      else if (document) await document.destroy();
-    } catch {
-      // Cleanup must not prevent a new document from rendering.
-    }
-  }
-
-  private getDocumentScope(): string | null {
-    return bookStore.getState().documentId ?? pdfService.getDocumentFingerprint();
-  }
-
-  private handleWorkerMessage(message: ThumbnailWorkerResponse) {
-    if (message.type === 'document-ready') {
-      if (this.pendingDocumentLoad?.documentId === message.documentId) {
-        this.activeDocumentId = message.documentId;
-        this.pendingDocumentLoad.resolve();
-        this.pendingDocumentLoad = null;
-      }
-      return;
-    }
-
-    if (message.type === 'document-error') {
-      if (this.pendingDocumentLoad?.documentId === message.documentId) {
-        this.activeDocumentId = null;
-        this.fallbackToMainThread = true;
-        this.pendingDocumentLoad.reject(new Error(message.error));
-        this.pendingDocumentLoad = null;
-      }
-      return;
-    }
-
-    const pending = this.pendingByKey.get(message.key);
-    const workerPending = this.pendingWorkerRenders.get(message.key);
-    // A late worker result must not replace a fallback render or a newer retry.
-    if (!workerPending || workerPending.id !== message.id) return;
-
-    if (message.type === 'error') {
-      this.pendingWorkerRenders.delete(message.key);
-
-      if (workerPending) {
-        workerPending.reject(new Error(message.error));
-      }
-
-      return;
-    }
-
-    if (!pending) {
-      return;
-    }
-
-    this.pendingWorkerRenders.delete(message.key);
-    workerPending?.resolve();
-
-    thumbnailStore.getState().markReady({
-      blobUrl: URL.createObjectURL(message.blob),
-      height: message.height,
-      key: message.key,
-      width: message.width,
-    });
-    thumbnailStore.getState().touchEntry(message.key);
-    this.trimCache();
-  }
-
-  private async ensureMainThreadDocument(documentId: string, source: Uint8Array): Promise<pdfjsLib.PDFDocumentProxy> {
-    if (this.mainThreadDocumentId === documentId && this.mainThreadDocument) {
-      return this.mainThreadDocument;
-    }
-
-    if (this.mainThreadDocumentId === documentId && this.mainThreadDocumentPromise) {
-      return this.mainThreadDocumentPromise;
-    }
-
-    await this.disposeMainThreadDocument();
-
-    const sourceCopy = new Uint8Array(source.byteLength);
-    sourceCopy.set(source);
-
-    this.mainThreadLoadingTask = pdfjsLib.getDocument({
-      data: sourceCopy,
-      isEvalSupported: false,
-      useWorkerFetch: false,
-    });
-
-    this.mainThreadDocumentId = documentId;
-    this.mainThreadDocumentPromise = this.mainThreadLoadingTask.promise.then((document) => {
-      this.mainThreadDocument = document;
-      return document;
-    }).catch((error: unknown) => {
-      this.mainThreadDocumentId = null;
-      this.mainThreadDocumentPromise = null;
-      throw error;
-    });
-
-    return this.mainThreadDocumentPromise;
-  }
-
-  private renderThumbnailOnMainThread(key: string, documentId: string, pageNumber: number, width: number, source: Uint8Array): Promise<void> {
-    const render = this.mainThreadRenderQueue.then(() => this.renderMainThreadThumbnail(key, documentId, pageNumber, width, source));
-    this.mainThreadRenderQueue = render.catch(() => undefined);
-    return render;
-  }
-
-  private async renderMainThreadThumbnail(key: string, documentId: string, pageNumber: number, width: number, source: Uint8Array): Promise<void> {
-    if (this.getDocumentScope() !== documentId) return;
-    const pdfDocument = await this.ensureMainThreadDocument(documentId, source);
-    const page = await pdfDocument.getPage(pageNumber);
-
-    try {
-      const baseViewport = page.getViewport({ scale: 1 });
-      const scale = width / baseViewport.width;
-      const viewport = page.getViewport({ scale });
-      const canvas = window.document.createElement('canvas');
+      if (!this.current(session)) return;
+      const base = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: request.width / base.width });
+      canvas = window.document.createElement('canvas');
       canvas.width = Math.max(1, Math.floor(viewport.width));
       canvas.height = Math.max(1, Math.floor(viewport.height));
       const context = canvas.getContext('2d');
-
-      if (!context) {
-        throw new Error('Thumbnail canvas context unavailable');
-      }
-
-      context.fillStyle = 'white';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-
-      await page.render({
-        canvas,
-        canvasContext: context,
-        viewport,
-      }).promise;
-
+      if (!context) throw new Error('Thumbnail canvas context unavailable');
+      context.fillStyle = 'white'; context.fillRect(0, 0, canvas.width, canvas.height);
+      slot.renderTask = page.render({ canvas, canvasContext: context, viewport });
+      try { await slot.renderTask.promise; } finally { slot.renderTask = null; }
+      if (!this.current(session)) return;
       const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((value) => {
-          if (value) {
-            resolve(value);
-            return;
-          }
-
-          reject(new Error('Failed to encode thumbnail blob'));
-        }, 'image/webp', 0.82);
+        canvas!.toBlob(value => value ? resolve(value) : reject(new Error('Failed to encode thumbnail blob')), 'image/webp', 0.82);
       });
-
-      if (this.getDocumentScope() !== documentId) return;
-
-      thumbnailStore.getState().markReady({
-        blobUrl: URL.createObjectURL(blob),
-        height: canvas.height,
-        key,
-        width: canvas.width,
-      });
-      thumbnailStore.getState().touchEntry(key);
-      this.trimCache();
+      if (this.current(session)) this.publish(session, request.key, blob, canvas.width, canvas.height);
     } finally {
-      page.cleanup();
+      try { page.cleanup(); }
+      finally { if (canvas) { canvas.width = 0; canvas.height = 0; } }
     }
   }
 
-  private createPendingWorkerRender(key: string, id: string): PendingWorkerRender {
-    let resolvePending!: () => void;
-    let rejectPending!: (error: Error) => void;
-    const promise = new Promise<void>((resolve, reject) => {
-      resolvePending = () => {
-        this.pendingWorkerRenders.delete(key);
-        resolve();
-      };
-      rejectPending = (error) => {
-        this.pendingWorkerRenders.delete(key);
-        reject(error);
-      };
-    });
-
-    const pending = {
-      id,
-      promise,
-      reject: rejectPending,
-      resolve: resolvePending,
-    };
-
-    this.pendingWorkerRenders.set(key, pending);
-
-    return pending;
+  private publish(session: DocumentSession, key: string, blob: Blob, width: number, height: number) {
+    if (!this.current(session)) return;
+    thumbnailStore.getState().markReady({ blobUrl: URL.createObjectURL(blob), height, key, width });
+    thumbnailStore.getState().touchEntry(key);
+    this.trimCache(session);
   }
 
-  private async renderThumbnailWithFallback(key: string, documentId: string, pageNumber: number, width: number, source: Uint8Array, worker: Worker | null): Promise<void> {
-    if (this.fallbackToMainThread || !worker) {
-      await this.renderThumbnailOnMainThread(key, documentId, pageNumber, width, source);
-      return;
-    }
-
-    try {
-      await withTimeout(this.ensureWorkerDocument(documentId, source, worker));
-
-      const request: ThumbnailWorkerRequest = {
-        documentId,
-        id: crypto.randomUUID(),
-        key,
-        maxWidth: width,
-        pageNumber,
-        type: 'render',
-      };
-
-      const pendingWorkerRender = this.createPendingWorkerRender(key, request.id);
-
-      try {
-        worker.postMessage(request);
-      } catch (error) {
-        pendingWorkerRender.reject(error instanceof Error ? error : new Error('Thumbnail worker unavailable'));
-      }
-      await withTimeout(pendingWorkerRender.promise);
-    } catch (error) {
-      this.disableWorker(error instanceof Error ? error : new Error('Thumbnail worker failed'));
-      await this.renderThumbnailOnMainThread(key, documentId, pageNumber, width, source);
-    }
-  }
-
-  private async ensureWorkerDocument(documentId: string, source: Uint8Array, worker: Worker): Promise<void> {
-    if (this.activeDocumentId === documentId) {
-      return;
-    }
-
-    if (this.pendingDocumentLoad?.documentId === documentId) {
-      return this.pendingDocumentLoad.promise;
-    }
-
-    if (this.pendingDocumentLoad) {
-      this.pendingDocumentLoad.reject(new Error('Thumbnail document load superseded by a new document.'));
-      this.pendingDocumentLoad = null;
-    }
-
-    let resolvePending!: () => void;
-    let rejectPending!: (error: Error) => void;
-    const promise = new Promise<void>((resolve, reject) => {
-      resolvePending = resolve;
-      rejectPending = reject;
-    });
-
-    this.pendingDocumentLoad = {
-      documentId,
-      promise,
-      reject: rejectPending,
-      resolve: resolvePending,
-    };
-
-    const sourceCopy = new Uint8Array(source.byteLength);
-    sourceCopy.set(source);
-
-    try {
-      worker.postMessage(
-        { documentId, source: sourceCopy.buffer, type: 'load-document' } satisfies ThumbnailWorkerRequest,
-        [sourceCopy.buffer],
-      );
-    } catch (error) {
-      rejectPending(error instanceof Error ? error : new Error('Thumbnail worker unavailable'));
-    }
-
-    return promise;
-  }
-
-  private trimCache() {
-    const state = thumbnailStore.getState();
-    const removableKeys = state.lruKeys.slice(MAX_CACHE_ENTRIES).filter((key) => !this.pendingByKey.has(key));
-
-    removableKeys.forEach((key) => {
-      thumbnailStore.getState().removeEntry(key);
-    });
+  private trimCache(session: DocumentSession) {
+    if (!this.current(session)) return;
+    thumbnailStore.getState().lruKeys.slice(MAX_CACHE_ENTRIES)
+      .filter(key => !session.requests.has(key)).forEach(key => thumbnailStore.getState().removeEntry(key));
   }
 
   ensureThumbnail(pageNumber: number, maxWidth = DEFAULT_THUMBNAIL_WIDTH): Promise<void> {
-    if (!Number.isFinite(pageNumber) || pageNumber < 1 || pageNumber > bookStore.getState().totalPages) return Promise.resolve();
+    const session = this.session;
+    if (!session || !Number.isFinite(pageNumber) || pageNumber < 1 || pageNumber > session.totalPages) return Promise.resolve();
     pageNumber = Math.round(pageNumber);
     const width = Number.isFinite(maxWidth) ? Math.max(48, Math.round(maxWidth)) : DEFAULT_THUMBNAIL_WIDTH;
-    const source = pdfService.getDocumentData();
-    const documentId = this.getDocumentScope();
     const key = this.getThumbnailKey(pageNumber, width);
-    const existing = thumbnailStore.getState().getEntry(key);
-    if (!source || !documentId) return Promise.resolve();
-    if (existing?.status === 'ready') {
-      thumbnailStore.getState().touchEntry(key);
-      return Promise.resolve();
+    if (thumbnailStore.getState().getEntry(key)?.status === 'ready') {
+      thumbnailStore.getState().touchEntry(key); return Promise.resolve();
     }
-    const pending = this.pendingByKey.get(key);
+    const pending = session.requests.get(key);
     if (pending) return pending.promise;
-    if (!existing || !isActiveThumbnailStatus(existing.status)) {
-      thumbnailStore.getState().markQueued({ key, pageNumber, width });
-    }
+    const request = { ...completion(), key, pageNumber, width };
+    session.requests.set(key, request);
+    thumbnailStore.getState().markQueued({ key, pageNumber, width });
     thumbnailStore.getState().markRendering(key);
-    const promise = Promise.resolve()
-      .then(() => this.renderThumbnailWithFallback(key, documentId, pageNumber, width, source, this.ensureWorker()))
-      .catch((error: unknown) => {
-        thumbnailStore.getState().markError(key);
-        throw error;
-      })
-      .finally(() => {
-        this.pendingByKey.delete(key);
-        this.trimCache();
-      });
-    this.pendingByKey.set(key, { promise });
-    return promise;
+    const finish = (failed: boolean, error?: unknown) => {
+      if (session.requests.get(key) === request) session.requests.delete(key);
+      this.trimCache(session);
+      if (failed && this.current(session)) {
+        thumbnailStore.getState().markError(key); request.reject(error);
+      } else request.resolve();
+    };
+    void Promise.resolve().then(() => this.render(session, request)).then(() => finish(false), error => finish(true, error));
+    return request.promise;
   }
 
   async ensureThumbnails(pages: number[], maxWidth = DEFAULT_THUMBNAIL_WIDTH): Promise<void> {
-    const uniquePages = Array.from(new Set(pages.filter((page) => Number.isFinite(page) && page > 0)));
-    await Promise.allSettled(uniquePages.map((page) => this.ensureThumbnail(page, maxWidth)));
+    await Promise.allSettled(Array.from(new Set(pages.filter(page => Number.isFinite(page) && page > 0)))
+      .map(page => this.ensureThumbnail(page, maxWidth)));
   }
 
   getThumbnailKey(pageNumber: number, width = DEFAULT_THUMBNAIL_WIDTH): string {
-    const documentScope = this.getDocumentScope() ?? 'unloaded';
-    return `${documentScope}_${Math.max(1, Math.round(pageNumber))}_${Math.max(48, Math.round(width))}`;
+    return `${this.session?.documentId ?? 'unloaded'}_${Math.max(1, Math.round(pageNumber))}_${Math.max(48, Math.round(width))}`;
   }
 }
-
 export const thumbnailService = ThumbnailService.shared;

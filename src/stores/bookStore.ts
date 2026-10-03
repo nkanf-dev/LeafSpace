@@ -1,14 +1,16 @@
 import { create } from 'zustand';
 import { pdfService } from '../services/PDFService';
+import { thumbnailService } from '../services/ThumbnailService';
 import type { TOCItem } from '../types/domain';
 
 type DocumentSource = File | string;
 
 interface BookStoreDependencies {
-  pdfService: Pick<typeof pdfService, 'loadDocument' | 'getDocumentFingerprint'>;
+  pdfService: Pick<typeof pdfService, 'loadDocument' | 'getDocumentFingerprint' | 'getDocumentData' | 'destroy'>;
+  thumbnailService: Pick<typeof thumbnailService, 'activateDocument' | 'releaseDocument'>;
 }
 
-const defaultDependencies: BookStoreDependencies = { pdfService };
+const defaultDependencies: BookStoreDependencies = { pdfService, thumbnailService };
 let dependencies: BookStoreDependencies = { ...defaultDependencies };
 let loadGeneration = 0;
 
@@ -77,6 +79,8 @@ export const useBookStore = create<BookStoreState>((set, get) => ({
   clearError: () => set({ error: null, status: get().documentId ? 'ready' : 'idle' }),
   startLoading: () => {
     loadGeneration += 1;
+    void dependencies.pdfService.destroy();
+    dependencies.thumbnailService.releaseDocument();
     releaseDocumentUrl(get().documentUrl);
     set({ ...emptyDocument, status: 'loading' });
   },
@@ -106,6 +110,10 @@ export const useBookStore = create<BookStoreState>((set, get) => ({
     const totalPages = normalizeTotalPages(payload.totalPages);
     const documentUrl = payload.documentUrl ?? null;
     releaseDocumentUrl(get().documentUrl, documentUrl);
+    const source = dependencies.pdfService.getDocumentFingerprint() === payload.documentId
+      ? dependencies.pdfService.getDocumentData() : null;
+    if (source) dependencies.thumbnailService.activateDocument({ documentId: payload.documentId, totalPages, source });
+    else dependencies.thumbnailService.releaseDocument();
     set({
       documentId: payload.documentId,
       documentName: payload.documentName ?? null,
@@ -130,6 +138,8 @@ export const useBookStore = create<BookStoreState>((set, get) => ({
   previousPage: () => get().setCurrentPage(get().currentPage - 1),
   reset: () => {
     loadGeneration += 1;
+    void dependencies.pdfService.destroy();
+    dependencies.thumbnailService.releaseDocument();
     releaseDocumentUrl(get().documentUrl);
     set({ ...emptyDocument, status: 'idle' });
   },
