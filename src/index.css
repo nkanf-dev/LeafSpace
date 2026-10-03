@@ -145,6 +145,7 @@ button:disabled { cursor: not-allowed; }
 }
 
 /* Keep the explicitly focused full-width guidance ring inside the viewport. */
-#workspace-problem-guidance:focus-visible {
+#workspace-problem-guidance:focus {
+  outline: 2px solid #786344;
   outline-offset: -3px;
 }

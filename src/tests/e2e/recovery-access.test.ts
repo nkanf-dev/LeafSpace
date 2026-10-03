@@ -77,6 +77,8 @@ test('dismissed restoration has a direct keyboard recovery path without overwrit
   expect(message!.width).toBeGreaterThanOrEqual(286);
   expect(recovery!.y).toBeGreaterThanOrEqual(message!.y + message!.height);
   await expect(alert).toHaveCSS('outline-offset', '-3px');
+  await expect(alert).toHaveCSS('outline-style', 'solid');
+  await expect(alert).toHaveCSS('outline-width', '2px');
   await info.attach('restore-guidance-focused-320', { body: await page.screenshot(), contentType: 'image/png' });
   const accessibility = await new AxeBuilder({ page }).include('#workspace-problem-guidance').analyze();
   expect(accessibility.violations).toEqual([]);
