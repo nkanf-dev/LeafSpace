@@ -60,6 +60,11 @@ test('dismissed restoration has a direct keyboard recovery path without overwrit
     await expect(page.getByRole('button', { name: '重试恢复', exact: true })).toBeVisible();
   }
   expect(await fault(page)).toEqual(before); expect((await snapshots(page))[0]).toEqual(original);
+  if (page.viewportSize()!.width >= 640) {
+    const message = await page.locator('#workspace-problem-message').boundingBox();
+    const recovery = await page.getByRole('button', { name: '重试恢复', exact: true }).boundingBox();
+    expect(recovery!.y).toBeLessThan(message!.y + message!.height);
+  }
   await info.attach('restore-guidance-rediscovered', { body: await page.screenshot(), contentType: 'image/png' });
   await page.setViewportSize({ width: 320, height: 740 });
   await page.getByRole('button', { name: '关闭提示', exact: true }).click();
