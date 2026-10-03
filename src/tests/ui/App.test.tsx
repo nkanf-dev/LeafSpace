@@ -79,6 +79,39 @@ describe('App document workflows', () => {
     resetWorkspaceStoreDependencies();
   });
 
+  it('provides a live autosave getter that blocks an idle registration until import finishes', async () => {
+    const { register } = setupDependencies();
+    let finish!: () => void;
+    register.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    render(<App />);
+    const readCurrent = vi.mocked(useWorkspaceAutoSave).mock.lastCall![0].readCurrent;
+    await act(async () => { selectFile(); });
+    try {
+      expect(useBookStore.getState()).toMatchObject({ documentId: 'new-book', status: 'ready' });
+      expect(workspaceStore.getState().status).toBe('idle');
+      expect(readCurrent()).toMatchObject({ documentId: 'new-book', enabled: false });
+    } finally { await act(async () => finish()); }
+    expect(readCurrent()).toMatchObject({ documentId: 'new-book', enabled: true });
+    act(() => useBookStore.getState().setCurrentPage(9));
+    expect(readCurrent()).toMatchObject({ currentPage: 9, sessionId: useBookStore.getState().sessionId });
+  });
+
+  it('keeps the live autosave restore barrier after alert dismissal and even after clearing its error', async () => {
+    const { restore } = setupDependencies(); openExistingBook();
+    restore.mockRejectedValueOnce(new Error('Unread saved workspace'));
+    await workspaceStore.getState().restoreWorkspace('old-book');
+    render(<App />);
+    const readCurrent = vi.mocked(useWorkspaceAutoSave).mock.lastCall![0].readCurrent;
+    expect(readCurrent().enabled).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '关闭提示' }));
+    expect(readCurrent().enabled).toBe(false);
+    act(() => workspaceStore.getState().clearError());
+    expect(workspaceStore.getState().status).toBe('idle');
+    expect(readCurrent().enabled).toBe(false);
+    await act(async () => { await workspaceStore.getState().restoreWorkspace('old-book'); });
+    expect(readCurrent().enabled).toBe(true);
+  });
+
   it('warns immediately about unsaved reading changes and stops after they are saved', async () => {
     setupDependencies(); openExistingBook();
     await workspaceStore.getState().restoreWorkspace('old-book');
@@ -279,6 +312,7 @@ describe('App document workflows', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '回到书库' })));
     expect(useBookStore.getState().documentId).toBe('old-book');
     expect(thumbnailService.releaseDocument).not.toHaveBeenCalled();
+    expect(vi.mocked(useWorkspaceAutoSave).mock.lastCall![0].readCurrent().enabled).toBe(false);
     await act(async () => finishSave());
     expect(useBookStore.getState().documentId).toBeNull();
     expect(thumbnailService.releaseDocument).toHaveBeenCalledOnce();
