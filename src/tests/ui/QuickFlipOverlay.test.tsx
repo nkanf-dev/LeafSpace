@@ -64,6 +64,12 @@ describe('QuickFlipOverlay', () => {
     expect(pageButton(10)).toBeInTheDocument();
   });
 
+  it('uses a quiet paper backdrop that does not depend on filter support', () => {
+    render(<QuickFlipOverlay {...props()} />);
+    const backdrop = screen.getByRole('dialog', { name: '速翻视图' }).firstElementChild;
+    expect(backdrop).toHaveClass('bg-[rgba(251,250,248,0.92)]', 'backdrop-blur-[40px]');
+  });
+
   it('cancels on Escape without committing the previewed page', () => {
     const callbacks = props();
     render(<QuickFlipOverlay {...callbacks} />);
