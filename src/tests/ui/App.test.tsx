@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../../app/App';
 import { useWorkspaceAutoSave } from '../../hooks/useWorkspaceAutoSave';
-import { PDFService } from '../../services/PDFService';
+import { PDFService, PDFPasswordRequiredError } from '../../services/PDFService';
 import { thumbnailService } from '../../services/ThumbnailService';
 import { PersistenceService } from '../../services/PersistenceService';
 import { configureBookStoreDependencies, resetBookStoreDependencies, useBookStore } from '../../stores/bookStore';
@@ -95,6 +95,35 @@ describe('App document workflows', () => {
     expect(register).toHaveBeenCalledWith(expect.objectContaining({ documentId: 'new-book', file, fileName: 'Research.pdf' }));
     expect(screen.getByText('阅读画布')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '保存现场' })).toBeEnabled();
+  });
+
+  it('explains password-required imports and recovers the import control for a usable copy', async () => {
+    const { load, register } = setupDependencies();
+    load.mockRejectedValueOnce(new PDFPasswordRequiredError()).mockRejectedValueOnce(new PDFPasswordRequiredError());
+    render(<App />);
+    const locked = new File(['synthetic encrypted fixture'], 'Protected.pdf', { type: 'application/pdf' });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await act(async () => { selectFile(locked); });
+      expect(screen.getByRole('alert')).toHaveTextContent('这份 PDF 需要打开密码，页境暂不支持');
+      expect(screen.getByRole('alert')).toHaveTextContent('本机另存一份无需打开密码');
+      expect(screen.getByRole('button', { name: '导入书籍' })).toBeEnabled();
+      expect(screen.getByLabelText('选择 PDF 文件')).toHaveValue('');
+      expect(register).not.toHaveBeenCalled();
+    }
+    await act(async () => { selectFile(); });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(useBookStore.getState().documentId).toBe('new-book');
+    expect(register).toHaveBeenCalledOnce();
+  });
+
+  it('keeps generic import failures distinct from password requirements', async () => {
+    const { load } = setupDependencies();
+    load.mockRejectedValueOnce(new Error('Invalid PDF; private detail'));
+    render(<App />);
+    await act(async () => { selectFile(); });
+    expect(screen.getByRole('alert')).toHaveTextContent('文件是否完整');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('需要打开密码');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('private detail');
   });
 
   it('flushes the current reading position before starting a replacement import', async () => {

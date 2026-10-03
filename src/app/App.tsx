@@ -10,6 +10,7 @@ import { useWindowStore } from '../stores/windowStore';
 import { useQuickFlipStore } from '../stores/quickFlipStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import { useWorkspaceAutoSave } from '../hooks/useWorkspaceAutoSave';
+import { PDFPasswordRequiredError } from '../services/PDFService';
 import { prepareHeldRead } from '../services/HeldReadTransaction';
 import { useThumbnailActions } from '../hooks/useThumbnailActions';
 import { ThumbnailActionDialog } from '../components/thumbnails/ThumbnailActionDialog';
@@ -118,8 +119,9 @@ function App() {
       const newId = useBookStore.getState().documentId;
       if (newId) await restoreWorkspace(newId);
       await registerCurrentBook(file);
-    } catch {
-      setWorkflowError('这本 PDF 没有成功打开或保存到本机。请检查文件是否完整、是否受密码保护，再重新导入。');
+    } catch (error) {
+      setWorkflowError(error instanceof PDFPasswordRequiredError ? error.message
+        : '这本 PDF 没有成功打开或保存到本机。请检查文件是否完整，再重新导入。');
     } finally {
       importLock.current = false;
       setIsHydratingDocument(false);

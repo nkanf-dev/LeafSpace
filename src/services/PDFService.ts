@@ -3,6 +3,14 @@ import type { TOCItem } from '../types/domain';
 
 export type PDFDocumentSource = File | Blob | string;
 
+export class PDFPasswordRequiredError extends Error {
+  constructor() {
+    super('这份 PDF 需要打开密码，页境暂不支持。请先在本机另存一份无需打开密码的 PDF，再重新导入。');
+    this.name = 'PDFPasswordRequiredError';
+  }
+}
+
+
 function cloneBytes(bytes: Uint8Array): Uint8Array {
   return Uint8Array.from(bytes);
 }
@@ -50,7 +58,16 @@ export class PDFService {
         useWorkerFetch: false,
         isEvalSupported: false,
       });
-      const doc = await loadingTask.promise;
+      const doc = await loadingTask.promise.catch((error: unknown) => {
+        // Classify only a typed parser rejection, never file-read errors or text.
+        // Owner-permission encryption can open without a user password and must
+        // remain supported; PDF.js rejects only when an opening password is needed.
+        if (error && typeof error === 'object' && 'name' in error && error.name === 'PasswordException'
+          && 'code' in error && (error.code === pdfjsLib.PasswordResponses.NEED_PASSWORD || error.code === pdfjsLib.PasswordResponses.INCORRECT_PASSWORD)) {
+          throw new PDFPasswordRequiredError();
+        }
+        throw error;
+      });
       if (generation !== this.loadGeneration) {
         throw new DOMException('文档加载已取消', 'AbortError');
       }
