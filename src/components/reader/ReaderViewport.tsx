@@ -188,8 +188,15 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     const frame = contentFrameRef.current?.getBoundingClientRect();
     if (!frame) return;
     // Anchor the same point on the paper, including fit-width centering/padding.
-    container.scrollLeft += frame.left - bounds.left + ((x - frameX) / oldScale) * scale - (centered ? container.clientWidth / 2 : x);
-    container.scrollTop += frame.top - bounds.top + ((y - frameY) / oldScale) * scale - (centered ? container.clientHeight / 2 : y);
+    const left = container.scrollLeft + frame.left - bounds.left + ((x - frameX) / oldScale) * scale - (centered ? container.clientWidth / 2 : x);
+    const top = container.scrollTop + frame.top - bounds.top + ((y - frameY) / oldScale) * scale - (centered ? container.clientHeight / 2 : y);
+    container.scrollLeft = left;
+    container.scrollTop = top;
+    // Some engines truncate scroll writes. Choose the nearest pixel there so
+    // alternating zooms do not accumulate a directional bias; retain subpixels
+    // where supported, and leave genuine boundary clamps alone.
+    if (left >= 0 && left <= container.scrollWidth - container.clientWidth && Math.abs(container.scrollLeft - left) > 0.5) container.scrollLeft = Math.round(left);
+    if (top >= 0 && top <= container.scrollHeight - container.clientHeight && Math.abs(container.scrollTop - top) > 0.5) container.scrollTop = Math.round(top);
     syncPanTargetToContainer();
     zoomPivot.current = null;
   }, [scale, syncPanTargetToContainer]);
