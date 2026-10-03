@@ -322,6 +322,52 @@ describe('logic store integration', () => {
     expect(workspaceStore.getState().status).toBe('idle');
   });
 
+  it('writes a pending PDF once before queued snapshots and retains the newest revision', async () => {
+    const service = new PersistenceService();
+    let finishAsset!: () => void;
+    const register = vi.spyOn(service, 'saveBookAsset').mockImplementation(() => new Promise<void>(resolve => { finishAsset = resolve; }));
+    const save = vi.spyOn(service, 'saveWorkspace').mockResolvedValue(undefined);
+    vi.spyOn(service, 'listRecentBooks').mockResolvedValue([]);
+    configureWorkspaceStoreDependencies({ persistenceService: service });
+    useBookStore.getState().setDocumentReady({ documentId: 'pending-asset', totalPages: 20, initialPage: 2 });
+    const registration = workspaceStore.getState().registerCurrentBook(new File(['%PDF-'], 'queued.pdf'));
+    await vi.waitFor(() => expect(register).toHaveBeenCalledTimes(1));
+    const firstSave = workspaceStore.getState().saveWorkspace('pending-asset');
+    useBookStore.getState().setCurrentPage(8);
+    const secondSave = workspaceStore.getState().saveWorkspace('pending-asset');
+    expect(save).not.toHaveBeenCalled();
+    finishAsset();
+    await Promise.all([registration, firstSave, secondSave]);
+    expect(register).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls.map(call => call[0].currentPage)).toEqual([2, 8]);
+    expect(workspaceStore.getState()).toMatchObject({ status: 'idle', error: null, currentSnapshot: { currentPage: 8 } });
+  });
+
+  it('retains the unread-snapshot barrier through registration and distinguishes recovery failures', async () => {
+    const service = new PersistenceService();
+    vi.spyOn(service, 'loadWorkspace').mockRejectedValue(new Error('Read failed'));
+    const register = vi.spyOn(service, 'saveBookAsset').mockRejectedValueOnce(new Error('PDF quota exceeded')).mockResolvedValue(undefined);
+    const save = vi.spyOn(service, 'saveWorkspace').mockRejectedValueOnce(new Error('Snapshot write failed')).mockResolvedValue(undefined);
+    vi.spyOn(service, 'listRecentBooks').mockResolvedValue([]);
+    configureWorkspaceStoreDependencies({ persistenceService: service });
+    useBookStore.getState().setDocumentReady({ documentId: 'both-failed', totalPages: 20 });
+    await workspaceStore.getState().restoreWorkspace('both-failed');
+    await workspaceStore.getState().registerCurrentBook(new File(['%PDF-'], 'book.pdf'));
+    expect(workspaceStore.getState()).toMatchObject({ errorOperation: 'register', unrestoredDocumentId: 'both-failed' });
+    workspaceStore.getState().clearError();
+    await workspaceStore.getState().saveWorkspace('both-failed');
+    expect(save).not.toHaveBeenCalled();
+    expect(register).toHaveBeenCalledTimes(1);
+    expect(workspaceStore.getState().errorOperation).toBe('restore');
+    await workspaceStore.getState().saveWorkspace('both-failed', { replaceUnrestored: true });
+    expect(workspaceStore.getState()).toMatchObject({ errorOperation: 'save', unrestoredDocumentId: 'both-failed' });
+    await workspaceStore.getState().saveWorkspace('both-failed');
+    expect(save).toHaveBeenCalledTimes(1);
+    await workspaceStore.getState().saveWorkspace('both-failed', { replaceUnrestored: true });
+    expect(register).toHaveBeenCalledTimes(2);
+    expect(workspaceStore.getState()).toMatchObject({ status: 'idle', error: null, unrestoredDocumentId: null });
+  });
+
   it('ignores a restore that completes after switching to another book', async () => {
     const service = new PersistenceService();
     let finishRestore!: (snapshot: WorkspaceSnapshot | null) => void;

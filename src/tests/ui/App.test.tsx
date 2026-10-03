@@ -153,6 +153,150 @@ describe('App document workflows', () => {
     expect(heldStore.getState().pages).toEqual([]);
   });
 
+  it('freezes transition input and flushes a late reading revision before leaving', async () => {
+    const { save } = setupDependencies();
+    let finishSave!: () => void;
+    save.mockImplementationOnce(() => new Promise<void>(resolve => { finishSave = resolve; }));
+    openExistingBook();
+    const reference = windowStore.getState().openInNewWindow(12);
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '回到书库' })));
+    expect(document.querySelector('main')).toHaveAttribute('inert');
+    expect(document.querySelector('footer')).toHaveAttribute('inert');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(windowStore.getState().windows.some(window => window.id === reference)).toBe(true);
+    // Model a scroll/render event already in flight when the transition began.
+    act(() => useBookStore.getState().setCurrentPage(9));
+    await act(async () => finishSave());
+    expect(save.mock.calls.map(call => call[0].currentPage)).toEqual([8, 9]);
+    expect(useBookStore.getState().documentId).toBeNull();
+  });
+
+  it('keeps an unsaved PDF open when saving its workspace or returning to the library', async () => {
+    const { register, save } = setupDependencies();
+    register.mockRejectedValue(new DOMException('PDF storage is full', 'QuotaExceededError'));
+    render(<App />);
+    await act(async () => { selectFile(); });
+    expect(workspaceStore.getState().errorOperation).toBe('register');
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '保存现场' })));
+    expect(workspaceStore.getState().errorOperation).toBe('register');
+    expect(screen.queryByText('已保存到本机')).not.toBeInTheDocument();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '回到书库' })));
+    expect(useBookStore.getState().documentId).toBe('new-book');
+    expect(save).not.toHaveBeenCalled();
+    expect(register).toHaveBeenCalledTimes(3);
+  });
+
+  it('retries the original PDF copy before saving the current reading position', async () => {
+    const { register, save } = setupDependencies();
+    register.mockRejectedValueOnce(new DOMException('PDF storage is full', 'QuotaExceededError'));
+    render(<App />);
+    const file = new File(['%PDF-'], 'Research.pdf', { type: 'application/pdf' });
+    await act(async () => { selectFile(file); });
+    act(() => useBookStore.getState().setCurrentPage(9));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '重试保存' })));
+    expect(register).toHaveBeenCalledTimes(2);
+    expect(register.mock.lastCall?.[0]).toMatchObject({ documentId: 'new-book', file });
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ documentId: 'new-book', currentPage: 9 }));
+    expect(workspaceStore.getState().error).toBeNull();
+    expect(screen.getByText('已保存到本机')).toBeInTheDocument();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '回到书库' })));
+    expect(register).toHaveBeenCalledTimes(2);
+    expect(useBookStore.getState().documentId).toBeNull();
+  });
+
+  it('does not replace unread saved context while leaving or importing another book', async () => {
+    const { restore, save, load } = setupDependencies();
+    restore.mockRejectedValueOnce(new Error('Temporary storage read failure'));
+    openExistingBook();
+    await workspaceStore.getState().restoreWorkspace('old-book');
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '回到书库' })));
+    expect(useBookStore.getState().documentId).toBe('old-book');
+    expect(save).not.toHaveBeenCalled();
+    await act(async () => { selectFile(); });
+    expect(load).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '重试恢复' })).toBeEnabled();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '重试恢复' })));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '回到书库' })));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(useBookStore.getState().documentId).toBeNull();
+  });
+
+  it('asks before replacing unread saved context and supports cancel then explicit replacement', async () => {
+    const { restore, save } = setupDependencies();
+    restore.mockRejectedValueOnce(new Error('Temporary storage read failure'));
+    openExistingBook();
+    await workspaceStore.getState().restoreWorkspace('old-book');
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '保存现场' })));
+    expect(save).not.toHaveBeenCalled();
+    expect(screen.getByRole('group', { name: '确认替换上次现场' })).toBeInTheDocument();
+    const cancel = screen.getByRole('button', { name: '取消覆盖' });
+    expect(cancel).toHaveFocus();
+    fireEvent.keyDown(cancel, { key: 'Escape' });
+    expect(screen.queryByRole('group', { name: '确认替换上次现场' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存现场' })).toHaveFocus();
+    expect(save).not.toHaveBeenCalled();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '保存现场' })));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '覆盖上次现场' })));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(workspaceStore.getState().error).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '回到书库' })));
+    expect(useBookStore.getState().documentId).toBeNull();
+  });
+
+  it('keeps navigation disabled until an approved workspace replacement finishes', async () => {
+    const { restore, save } = setupDependencies();
+    restore.mockRejectedValueOnce(new Error('Temporary storage read failure'));
+    let finishSave!: () => void;
+    save.mockImplementationOnce(() => new Promise<void>(resolve => { finishSave = resolve; }));
+    openExistingBook();
+    await workspaceStore.getState().restoreWorkspace('old-book');
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '保存现场' })));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '覆盖上次现场' })));
+    expect(screen.getByRole('button', { name: '回到书库' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '导入书籍' })).toBeDisabled();
+    expect(document.querySelector('main')).toHaveAttribute('inert');
+    await act(async () => finishSave());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '回到书库' })).toBeEnabled();
+    expect(workspaceStore.getState()).toMatchObject({ status: 'idle', error: null, unrestoredDocumentId: null });
+  });
+
+  it('cancels replacement before closing reference windows even after focus leaves the warning', async () => {
+    const { restore } = setupDependencies();
+    restore.mockRejectedValueOnce(new Error('Temporary storage read failure'));
+    openExistingBook();
+    await workspaceStore.getState().restoreWorkspace('old-book');
+    const reference = windowStore.getState().openInNewWindow(12);
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '保存现场' })));
+    expect(screen.getByRole('button', { name: '取消覆盖' })).toHaveAccessibleDescription(/替换它/);
+    screen.getByRole('region', { name: '主阅读区' }).focus();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('group', { name: '确认替换上次现场' })).not.toBeInTheDocument();
+    expect(windowStore.getState().windows.some(window => window.id === reference)).toBe(true);
+    expect(screen.getByRole('button', { name: '保存现场' })).toHaveFocus();
+  });
+
+  it('does not carry a cancelled-by-restoration replacement prompt into another book', async () => {
+    const { restore } = setupDependencies();
+    restore.mockRejectedValueOnce(new Error('Temporary storage read failure'));
+    openExistingBook();
+    await workspaceStore.getState().restoreWorkspace('old-book');
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '保存现场' })));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '重试恢复' })));
+    expect(screen.queryByRole('group', { name: '确认替换上次现场' })).not.toBeInTheDocument();
+    restore.mockRejectedValueOnce(new Error('Another read failure'));
+    await act(async () => { selectFile(); });
+    expect(workspaceStore.getState().unrestoredDocumentId).toBe('new-book');
+    expect(screen.queryByRole('group', { name: '确认替换上次现场' })).not.toBeInTheDocument();
+  });
+
   it('dismisses storage errors without clearing the failure or re-enabling autosave', async () => {
     const { save } = setupDependencies();
     openExistingBook();
