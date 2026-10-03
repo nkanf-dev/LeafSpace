@@ -192,6 +192,18 @@ for (const format of ['bytes', 'blob'] as const) {
   });
 }
 
+// A visible canvas alone does not establish that decoded page pixels are sound.
+// This fixture has a green rectangle at PDF (40,100)-(215,300) on page seven.
+async function fixturePixels(page: Page) {
+  return reader(page).locator('canvas').evaluate((canvas: HTMLCanvasElement) => {
+    const context = canvas.getContext('2d')!;
+    const pixel = (x: number, y: number) => Array.from(context.getImageData(
+      Math.floor(canvas.width * x / 420), Math.floor(canvas.height * y / 594), 1, 1).data);
+    return { width: canvas.width, height: canvas.height, visibility: getComputedStyle(canvas).visibility,
+      background: pixel(10, 10), rectangle: pixel(80, 394), transform: Array.from(context.getTransform().toFloat64Array()) };
+  });
+}
+
 for (const failure of ['schema', 'metadata'] as const) {
   test(`an intact legacy PDF remains readable during ${failure} failure and saving recovers after retry`, async ({ page }, info) => {
     await seedLegacyBook(page, 'bytes');
@@ -202,6 +214,18 @@ for (const failure of ['schema', 'metadata'] as const) {
     await page.getByRole('button', { name: '保存现场', exact: true }).click();
     await expect(page.getByRole('alert')).toBeVisible();
     expect((await probe(page)).assetWrites).toBe(0);
+    await expect(reader(page).locator('canvas')).toBeVisible();
+    const initialPixels = await fixturePixels(page);
+    await info.attach(`${failure}-initial-decoded-pixels`, { body: JSON.stringify(initialPixels), contentType: 'application/json' });
+    const bitmap = await reader(page).locator('canvas').evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL('image/png').split(',')[1]);
+    await info.attach(`${failure}-decoded-bitmap`, { body: Buffer.from(bitmap, 'base64'), contentType: 'image/png' });
+    // Check the next painted frames separately: a screenshot/compositor anomaly
+    // must not be mistaken for an intact canvas or silently accepted as success.
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const settledPixels = await fixturePixels(page);
+    await info.attach(`${failure}-settled-decoded-pixels`, { body: JSON.stringify(settledPixels), contentType: 'application/json' });
+    expect(settledPixels.background).toEqual([240, 237, 224, 255]);
+    expect(settledPixels.rectangle).toEqual([51, 128, 76, 255]);
     await info.attach(`${failure}-failure-readable`, { body: await page.screenshot(), contentType: 'image/png' });
     await page.evaluate(() => { (window as unknown as { leafspaceMetadataProbe: { enabled: boolean } }).leafspaceMetadataProbe.enabled = false; });
     await page.getByRole('button', { name: '重试保存', exact: true }).click();
