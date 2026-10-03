@@ -11,6 +11,8 @@ import { useQuickFlipStore } from '../stores/quickFlipStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import { useWorkspaceAutoSave } from '../hooks/useWorkspaceAutoSave';
 import { prepareHeldRead } from '../services/HeldReadTransaction';
+import { useThumbnailActions } from '../hooks/useThumbnailActions';
+import { ThumbnailActionDialog } from '../components/thumbnails/ThumbnailActionDialog';
 
 function isCurrentWorkspaceSaved(documentId: string | null) {
   const snapshot = useWorkspaceStore.getState().currentSnapshot;
@@ -78,6 +80,7 @@ function App() {
   }, [showHeldPages]);
   const busy = isHydratingDocument || bookStatus === 'loading' || workspaceStatus === 'restoring'
     || (workspaceStatus === 'saving' && workspace.unrestoredDocumentId === documentId);
+  const thumbnailActions = useThumbnailActions(`${showHeldPages}:${busy}`);
   const ready = !!documentId && bookStatus === 'ready' && !busy;
   const replacementNeedsConfirmation = replaceDocumentId === documentId && !!documentId && workspace.unrestoredDocumentId === documentId;
   const flushWorkspace = useCallback(async (id: string) => {
@@ -131,7 +134,7 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (busy || event.defaultPrevented || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (thumbnailActions.controller.ownsInput() || busy || event.defaultPrevented || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.key === 'Escape' && !isQuickFlipVisible) {
         if (replacementNeedsConfirmation) {
           event.preventDefault();
@@ -163,7 +166,7 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [ready, busy, isQuickFlipVisible, activePage, showQuickFlip, dismissQuickFlip, showHeldPages, replacementNeedsConfirmation]);
+  }, [thumbnailActions.controller, ready, busy, isQuickFlipVisible, activePage, showQuickFlip, dismissQuickFlip, showHeldPages, replacementNeedsConfirmation]);
 
   const returnToLibrary = async () => {
     if (!ready || importLock.current) return;
@@ -207,7 +210,7 @@ function App() {
 
   return (
     <>
-      <div inert={isQuickFlipVisible} className="flex h-dvh min-h-0 w-full flex-col bg-[var(--app-bg)] text-[var(--ink)]">
+      <div inert={isQuickFlipVisible || thumbnailActions.isOpen} className="flex h-dvh min-h-0 w-full flex-col bg-[var(--app-bg)] text-[var(--ink)]">
         <header className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-[var(--border)] bg-[var(--surface)] px-4 py-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <button type="button" aria-label="回到书库" disabled={!ready} onClick={() => void returnToLibrary()} className="text-2xl font-extrabold italic tracking-tight text-stone-900 disabled:cursor-default" style={{ fontFamily: 'Georgia, serif' }}>LeafSpace</button>
@@ -259,7 +262,7 @@ function App() {
         {(windowNotice || heldNotice) && <div role="status" className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-950"><span>{windowNotice || heldNotice}</span><button aria-label="关闭操作提示" className="p-2" onClick={() => { clearWindowNotice(); useHeldStore.getState().clearNotice(); }}><X size={16} /></button></div>}
         <main inert={busy} className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <section inert={showHeldPages} className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#edece9]">
-            {documentId ? <WorkspaceCanvas windows={windows} onWindowUpdate={(win) => { updateWindow(win.id, win); if (win.isActive) setActiveWindow(win.id); }} onWindowClose={closeReferenceWindow} /> : (
+            {documentId ? <WorkspaceCanvas subscribeInterruption={thumbnailActions.controller.onInterrupt} windows={windows} onWindowUpdate={(win) => { updateWindow(win.id, win); if (win.isActive) setActiveWindow(win.id); }} onWindowClose={closeReferenceWindow} /> : (
               <div className="flex min-h-0 flex-1 overflow-y-auto bg-[var(--surface)] p-4 sm:p-8 lg:items-center lg:justify-center">
                 <div className="m-auto grid w-full max-w-[1080px] grid-cols-1 border border-[var(--border)] bg-[var(--surface)] shadow-[0_24px_70px_rgba(28,25,23,0.05)] md:grid-cols-[1.15fr_0.85fr]">
                   <div className="px-6 py-9 sm:px-10 sm:py-12 md:border-r md:border-[var(--border)]">
@@ -290,7 +293,7 @@ function App() {
           </section>
           {documentId && <aside id="held-pages-panel" aria-label="夹页列表" className={`${showHeldPages ? 'absolute inset-0 z-30 flex' : 'hidden'} min-h-0 w-full shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface)] lg:static lg:flex lg:w-[280px]`}>
             <button ref={heldBackRef} className="min-h-11 border-b border-[var(--border)] px-5 text-left text-sm lg:hidden" onClick={closeHeldPanel}>← 返回阅读</button>
-            <HeldPagesPanel pages={heldPages} interactionKey={`${documentId}:${showHeldPages}:${busy}:${isQuickFlipVisible}`} onReorder={useHeldStore.getState().reorderHeldPages} onPrepareReadPage={page => {
+            <HeldPagesPanel pages={heldPages} thumbnailActions={thumbnailActions.controller} actionsSuspended={thumbnailActions.isOpen} fallbackActionFocus={() => heldToggleRef.current} interactionKey={`${documentId}:${activeWindowId}:${showHeldPages}:${busy}:${isQuickFlipVisible}`} onReorder={useHeldStore.getState().reorderHeldPages} onPrepareReadPage={page => {
               const transaction = prepareHeldRead(page.pageNumber);
               return { ...transaction, commit: () => {
                 if (!transaction.commit()) return false;
@@ -304,9 +307,10 @@ function App() {
             }} onPageClick={(page) => { openInNewWindow(page.pageNumber); closeHeldPanel(); }} onRemovePage={(id, closeReferences) => { const page = heldPages.find((candidate) => candidate.id === id); if (page) { if (closeReferences) useWindowStore.getState().closeWindowsForPage(page.pageNumber); unholdPage(page.pageNumber); } }} />
           </aside>}
         </main>
-        {documentId && <footer inert={busy} className="h-16 shrink-0 border-t border-[var(--border)]"><TimelineBar key={`${documentId}:${activeWindowId}:${isQuickFlipVisible}:${showHeldPages}:${busy}`} currentPage={activePage} chapters={book.toc} totalPages={totalPages} onPageClick={jumpToPage} markers={heldPages.map((page) => page.pageNumber)} /></footer>}
+        {documentId && <footer inert={busy} className="h-16 shrink-0 border-t border-[var(--border)]"><TimelineBar key={`${documentId}:${activeWindowId}:${isQuickFlipVisible}:${showHeldPages}:${busy}:${thumbnailActions.isOpen}`} currentPage={activePage} chapters={book.toc} totalPages={totalPages} onPageClick={jumpToPage} markers={heldPages.map((page) => page.pageNumber)} /></footer>}
       </div>
-      {isQuickFlipVisible && ready && <QuickFlipOverlay isVisible restoreFocusOnClose={false} onClose={dismissQuickFlip} currentPage={quickFlipOrigin.current.page} totalPages={totalPages} onPageChange={page => { updateWindow(quickFlipOrigin.current.windowId, { pageNumber: page }); setActiveWindow(quickFlipOrigin.current.windowId); }} />}
+      {isQuickFlipVisible && ready && <QuickFlipOverlay thumbnailActions={thumbnailActions.controller} interactionSuspended={thumbnailActions.isOpen} isVisible restoreFocusOnClose={false} onClose={dismissQuickFlip} currentPage={quickFlipOrigin.current.page} totalPages={totalPages} onPageChange={page => { updateWindow(quickFlipOrigin.current.windowId, { pageNumber: page }); setActiveWindow(quickFlipOrigin.current.windowId); }} />}
+      {thumbnailActions.request && <ThumbnailActionDialog controller={thumbnailActions.controller} request={thumbnailActions.request} awaitingRelease={thumbnailActions.awaitingRelease} />}
     </>
   );
 }

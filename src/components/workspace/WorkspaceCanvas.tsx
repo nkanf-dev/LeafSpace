@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { ReaderViewport } from '../reader/ReaderViewport';
 import { useWindowStore } from '../../stores/windowStore';
 import { RefreshCcw, ExternalLink, Columns2, X } from 'lucide-react';
@@ -6,6 +6,7 @@ import type { ReaderWindow } from '../../types/domain';
 
 interface Props {
   windows: ReaderWindow[];
+  subscribeInterruption?: (callback: () => void) => () => void;
   onWindowUpdate: (updatedWindow: ReaderWindow) => void;
   onWindowClose: (id: string) => void;
 }
@@ -14,7 +15,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWindowClose }) => {
+export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWindowClose, subscribeInterruption }) => {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [isResizingSplit, setIsResizingSplit] = useState(false);
@@ -24,6 +25,8 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
     setDraggingId(null); setResizingId(null); setIsResizingSplit(false);
     document.body.classList.remove('is-panning');
   }, []);
+
+  useLayoutEffect(() => subscribeInterruption?.(stopInteraction), [subscribeInterruption, stopInteraction]);
 
   const dragOffset = useRef({ x: 0, y: 0 });
   const resizeStart = useRef({ x: 0, y: 0, w: 0, h: 0 });
@@ -137,6 +140,7 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
 
     const onVisibility = () => { if (document.visibilityState === 'hidden') stopInteraction(); };
     const onKeyDown = (event: KeyboardEvent) => {
+      if (workspaceRef.current?.closest('[inert]')) { stopInteraction(); return; }
       if (!interactionActive.current || (event.key !== 'Escape' && event.key !== ' ')) return;
       stopInteraction();
       // Escape cancels the pointer operation before the global window-close action.
@@ -174,7 +178,7 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
             <button className={surfaceIconButton} title="浮动" onClick={() => onWindowUpdate({ ...win, dockMode: 'none', type: 'floating' })}><ExternalLink size={14} /></button>
             <button className={dangerIconButton} title="关闭" onClick={() => onWindowClose(win.id)}><X size={14} /></button>
           </div>}
-          <ReaderViewport isMain={win.id === 'main'} pageNumber={win.pageNumber} windowId={win.id} />
+          <ReaderViewport subscribeInterruption={subscribeInterruption} isMain={win.id === 'main'} pageNumber={win.pageNumber} windowId={win.id} />
         </div>)}
       </div> : <div className="workspace-split flex min-h-0 flex-1 h-full w-full min-w-0 bg-[var(--border)]">
         {mainWindow && (
@@ -183,7 +187,7 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
             className={`workspace-main min-h-0 min-w-0 flex flex-col overflow-hidden bg-[var(--surface)] ${mainWindow.isActive ? '' : ''}`}
             style={dockedWindow ? { width: `calc(${splitRatio * 100}% - 2px)` } : { width: '100%' }}
           >
-            <ReaderViewport isMain={true} windowId={mainWindow.id} />
+            <ReaderViewport subscribeInterruption={subscribeInterruption} isMain={true} windowId={mainWindow.id} />
           </div>
         )}
         {dockedWindow && (
@@ -222,7 +226,7 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
                 <button type="button" className={dangerIconButton} onClick={() => onWindowClose(dockedWindow.id)} title="关闭"><X size={14} strokeWidth={2.5} /></button>
               </div>
             </div>
-            <ReaderViewport pageNumber={dockedWindow.pageNumber} windowId={dockedWindow.id} />
+            <ReaderViewport subscribeInterruption={subscribeInterruption} pageNumber={dockedWindow.pageNumber} windowId={dockedWindow.id} />
             </div>
           </>
         )}
@@ -252,7 +256,7 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-hidden">
-            <ReaderViewport pageNumber={win.pageNumber} windowId={win.id} />
+            <ReaderViewport subscribeInterruption={subscribeInterruption} pageNumber={win.pageNumber} windowId={win.id} />
           </div>
           <div className="absolute bottom-0 right-0 hidden h-4 w-4 cursor-nwse-resize sm:block bg-[linear-gradient(135deg,transparent_50%,var(--border)_50%)] hover:bg-[linear-gradient(135deg,transparent_50%,#1c1917_50%)]" onMouseDown={(e) => handleResizeStart(e, win)} />
         </div>

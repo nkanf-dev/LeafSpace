@@ -1,11 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { HeldPage } from '../../types/domain';
 import { LayoutGrid, List, X, Columns2, ArrowUp, ArrowDown } from 'lucide-react';
 import { CachedThumbnail } from '../thumbnails/CachedThumbnail';
 import type { PreparedHeldRead } from '../../services/HeldReadTransaction';
+import type { ThumbnailActions } from '../../services/ThumbnailActions';
+import { useThumbnailLongPress } from '../../hooks/useThumbnailLongPress';
 
 interface Props {
   pages: HeldPage[];
+  thumbnailActions?: ThumbnailActions;
+  actionsSuspended?: boolean;
+  fallbackActionFocus?: () => HTMLElement | null;
   onPageClick: (page: HeldPage) => void;
   onReadPage?: (page: HeldPage) => void;
   onPrepareReadPage?: (page: HeldPage) => PreparedHeldRead;
@@ -14,7 +19,7 @@ interface Props {
   onReorder?: (fromIndex: number, toIndex: number) => void;
 }
 
-export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onReadPage, onPrepareReadPage, interactionKey, onRemovePage, onReorder }) => {
+export const HeldPagesPanel: React.FC<Props> = ({ pages, thumbnailActions, actionsSuspended = false, fallbackActionFocus, onPageClick, onReadPage, onPrepareReadPage, interactionKey, onRemovePage, onReorder }) => {
   const [pendingRemoval, setPendingRemoval] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
   const readTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -37,12 +42,30 @@ export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onReadPage
     setPendingRemoval(null);
     window.requestAnimationFrame(() => (nextId ? readButtons.current.get(nextId) : headingRef.current)?.focus());
   };
-  const cancelPendingRead = () => {
+  const cancelPendingRead = useCallback(() => {
     if (readTimer.current !== null) clearTimeout(readTimer.current);
     readTimer.current = null;
     preparedRead.current?.transaction.dispose();
     preparedRead.current = null;
+  }, []);
+  useEffect(() => thumbnailActions?.onInterrupt(cancelPendingRead), [cancelPendingRead, thumbnailActions]);
+  const requestRemoval = (page: HeldPage) => {
+    cancelPendingRead();
+    if (page.linkedWindowIds.some(id => id !== 'main')) setPendingRemoval(page.id);
+    else removePage(page.id);
   };
+  const longPress = useThumbnailLongPress({
+    controller: thumbnailActions, enabled: !actionsSuspended && pendingRemoval === null,
+    contextKey: `${interactionKey}:${viewMode}:${pages.map(page => `${page.id}/${page.pageNumber}`).join(',')}`,
+    request: (page: HeldPage, opener) => ({
+      pageNumber: page.pageNumber, opener, fallbackFocus: () => fallbackActionFocus?.() ?? headingRef.current,
+      actions: [
+        { id: 'read', label: '阅读此页', run: () => (onReadPage ?? onPageClick)(page), focus: 'delegate' },
+        { id: 'reference', label: '打开参考窗', run: () => onPageClick(page), focus: 'delegate' },
+        { id: 'remove', label: '移除夹页', run: () => requestRemoval(page), focus: 'delegate' },
+      ],
+    }),
+  });
   useEffect(() => () => {
     if (readTimer.current !== null) clearTimeout(readTimer.current);
     readTimer.current = null;
@@ -76,7 +99,8 @@ export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onReadPage
         ) : pages.map((page, index) => (
           <div key={page.id} onKeyDown={event => { if (event.key === 'Escape' && pendingRemoval === page.id) { event.preventDefault(); event.stopPropagation(); cancelRemoval(); } }} className={`relative mx-3 my-3 flex overflow-hidden border bg-white ${page.isOpen ? 'border-stone-700' : 'border-[var(--border)]'}`}>
             <div inert={pendingRemoval === page.id} className="flex min-w-0 flex-1">
-            <button ref={element => { if (element) readButtons.current.set(page.id, element); else readButtons.current.delete(page.id); }} type="button" aria-label={`阅读第 ${page.pageNumber} 页`} onPointerDown={event => { pointerType.current = event.pointerType; }} onClick={(event) => {
+            <button ref={element => { if (element) readButtons.current.set(page.id, element); else readButtons.current.delete(page.id); }} type="button" aria-label={`阅读第 ${page.pageNumber} 页`} onPointerDown={event => { pointerType.current = event.pointerType; if (event.pointerType === 'touch') cancelPendingRead(); longPress.onPointerDown(event, page); }} onContextMenu={longPress.onContextMenu} onClick={(event) => {
+              if (thumbnailActions?.ownsInput()) return;
               if (event.detail > 1) return;
               cancelPendingRead();
               comparedOnClick.current = false;
@@ -96,7 +120,7 @@ export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onReadPage
               if (pointerType.current !== 'mouse' || window.innerWidth < 1024 || comparedOnClick.current) return;
               if (preparedRead.current?.id === page.id) preparedRead.current.transaction.rollback();
               cancelPendingRead(); onPageClick(page);
-            }} className="flex min-w-0 flex-1 items-center text-left transition hover:bg-stone-50">
+            }} className="thumbnail-action-target flex min-w-0 flex-1 items-center text-left transition hover:bg-stone-50">
               {viewMode === 'card' && <CachedThumbnail alt={`第 ${page.pageNumber} 页缩略图`} className="shrink-0 bg-[#f0ede9]" height={80} width={60} pageNumber={page.pageNumber} priority placeholder={<span className="p-3 text-stone-400">{page.pageNumber}</span>} />}
               <span className="min-w-0 flex-1 p-3">
                 <span className="block text-xs text-stone-500">第 {page.pageNumber} 页{page.isOpen ? ' · 已打开' : ''}</span>
@@ -106,7 +130,7 @@ export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onReadPage
             </button>
             <div className="flex shrink-0 flex-col">
             <button type="button" className="p-3 text-stone-500 hover:text-stone-900" aria-label={`打开第 ${page.pageNumber} 页参考窗口`} title="打开参考窗口" onClick={() => { cancelPendingRead(); onPageClick(page); }}><Columns2 size={16} /></button>
-            <button ref={element => { if (element) removeButtons.current.set(page.id, element); else removeButtons.current.delete(page.id); }} type="button" className="self-start p-3 text-stone-400 hover:text-red-700" onClick={() => { cancelPendingRead(); if (page.linkedWindowIds.some(id => id !== 'main')) setPendingRemoval(page.id); else removePage(page.id); }} aria-label={`移除第 ${page.pageNumber} 页夹页`} title="移除"><X size={16} /></button>
+            <button ref={element => { if (element) removeButtons.current.set(page.id, element); else removeButtons.current.delete(page.id); }} type="button" className="self-start p-3 text-stone-400 hover:text-red-700" onClick={() => requestRemoval(page)} aria-label={`移除第 ${page.pageNumber} 页夹页`} title="移除"><X size={16} /></button>
             </div>
             {onReorder && <div className="flex shrink-0 flex-col justify-center border-l border-[var(--border)]">
               <button className="p-2 text-stone-500 disabled:opacity-25" disabled={index === 0} aria-label={`上移第 ${page.pageNumber} 页夹页`} onClick={() => { cancelPendingRead(); onReorder(index, index - 1); }}><ArrowUp size={14} /></button>

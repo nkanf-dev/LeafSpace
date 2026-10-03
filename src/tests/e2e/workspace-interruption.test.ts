@@ -5,6 +5,29 @@ test.beforeEach(async ({ page }) => {
   await importBook(page);
 });
 
+test('ordinary mouse pan and inactive-reference drag survive their own reading-state updates', async ({ page }) => {
+  const region = reader(page);
+  for (let index = 0; index < 4; index++) await page.getByRole('button', { name: '放大', exact: true }).click();
+  await expect.poll(() => region.evaluate(element => element.scrollWidth > element.clientWidth + 100)).toBe(true);
+  const box = await region.boundingBox(); if (!box) throw new Error('Missing reader');
+  await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.7); await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.7 - 50, box.y + box.height * 0.7 - 50, { steps: 4 });
+  const mid = await region.evaluate(element => ({ x: element.scrollLeft, y: element.scrollTop }));
+  await page.mouse.move(box.x + box.width * 0.7 - 130, box.y + box.height * 0.7 - 130, { steps: 8 });
+  await expect.poll(() => region.evaluate(element => element.scrollTop)).toBeGreaterThan(mid.y + 40);
+  await page.mouse.up();
+  await holdCurrentPage(page, 1); await page.getByRole('button', { name: '打开第 1 页参考窗口', exact: true }).click();
+  const floating = page.locator('[data-floating-window]'); await expect(floating.locator('canvas')).toBeVisible();
+  await region.focus(); // Make the reference inactive before its drag starts.
+  const before = await floating.boundingBox(); const title = await floating.getByText('参考: P.1', { exact: true }).boundingBox();
+  if (!before || !title) throw new Error('Missing floating reference');
+  await page.mouse.move(title.x + 20, title.y + 5); await page.mouse.down();
+  await page.mouse.move(title.x + 80, title.y + 35, { steps: 8 }); await page.mouse.up();
+  const after = await floating.boundingBox();
+  expect(after!.x - before.x).toBeGreaterThan(40); expect(after!.y - before.y).toBeGreaterThan(20);
+  await expect(page.locator('[data-thumbnail-actions]')).toHaveCount(0);
+});
+
 for (const layout of ['floating', 'split', 'grid'] as const) {
   test(`keyboard close in ${layout} layout returns to the surviving reader`, async ({ page }) => {
     await holdCurrentPage(page, 1);

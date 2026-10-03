@@ -60,7 +60,7 @@ describe('QuickFlipOverlay', () => {
   it('renders the named dialog with keyboard help when visible', () => {
     render(<QuickFlipOverlay {...props()} />);
     expect(screen.getByRole('dialog', { name: '速翻视图' })).toBeInTheDocument();
-    expect(screen.getByText('长按进入时间轴')).toBeInTheDocument();
+    expect(screen.getByText('长按左右键进入时间轴')).toBeInTheDocument();
     expect(pageButton(10)).toBeInTheDocument();
   });
 
