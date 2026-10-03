@@ -71,7 +71,7 @@ test('zoom anchors remain stable across fit-to-overflow transitions at narrow an
     await page.setViewportSize(size);
     await region.locator('..').getByRole('button', { name: '恢复适合宽度', exact: true }).click();
     await expect(region.locator('canvas')).toBeVisible();
-    await expect.poll(() => region.evaluate(element => Math.abs(element.querySelector('canvas')!.getBoundingClientRect().width - Math.min(612, element.clientWidth - (innerWidth < 640 ? 32 : 80))))).toBeLessThan(1);
+    await expect.poll(() => region.evaluate(element => Math.abs(element.querySelector('canvas')!.getBoundingClientRect().width - Math.min(612, element.clientWidth - (innerWidth < 640 ? 32 : 80) - 2)))).toBeLessThan(1);
     const before = await paperPoint(region);
     await zoom(region, '放大');
     await expectPoint(region, before);

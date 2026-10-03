@@ -90,6 +90,17 @@ describe('ReaderViewport', () => {
     expect(renderLifecycle.canvasRefs.at(-1)).toBe(initialize);
   });
 
+  it.each([[390, 380], [639, 629], [640, 630], [1440, 1150]])('fits the complete bordered paper at viewport %i and scrollport %i', (viewportWidth, clientWidth) => {
+    vi.stubGlobal('innerWidth', viewportWidth);
+    loadDocument(); render(<ReaderViewport isMain windowId="main" />);
+    const region = readerRegion(); mockScrollGeometry(region)({ width: clientWidth, scrollWidth: clientWidth });
+    act(() => resizeCallbacks.forEach(callback => callback()));
+    act(() => renderLifecycle.loads.at(-1)!({ pageNumber: 3, getViewport: () => ({ width: 420, height: 594 }) } as unknown as PDFPageProxy));
+    const padding = viewportWidth < 640 ? 32 : 80;
+    expect(region.querySelector<HTMLElement>('.w-max')!.style.width).toBe(`${Math.min(614, clientWidth - padding)}px`);
+    expect(region).toHaveStyle({ overflowY: 'scroll' });
+  });
+
   it('uses bookStore as the source of the main page and scale', () => {
     loadDocument(7, 1.5);
     render(<ReaderViewport pageNumber={1} isMain windowId="main" />);
