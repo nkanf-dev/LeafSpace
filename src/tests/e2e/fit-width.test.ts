@@ -99,7 +99,7 @@ test('every grid pane fits without horizontal scrolling and still zooms independ
   await info.attach('fit-grid-geometry', { body: JSON.stringify(measurements), contentType: 'application/json' });
   for (const region of await regions.all()) expectPixels(await decodedPixels(region));
   const reference = regions.nth(1);
-  await reference.locator('..').getByRole('button', { name: '放大', exact: true }).click();
+  await reference.locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '放大', exact: true }).click();
   await expect.poll(() => reference.evaluate(element => element.scrollWidth - element.clientWidth)).toBeGreaterThan(20);
-  await expect(reader(page).locator('..').getByRole('button', { name: '恢复适合宽度', exact: true })).toHaveText('100%');
+  await expect(reader(page).locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '恢复适合宽度', exact: true })).toHaveText('100%');
 });

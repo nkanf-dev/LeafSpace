@@ -185,3 +185,47 @@ test('a short 320px reader keeps Retry reachable and lets navigation leave a fai
   await page.keyboard.press('ArrowLeft'); await expect(page.locator('header')).toContainText('第 1 页'); await decoded(reader(page));
   await expect(controls(reader(page)).getByRole('alert')).toHaveCount(0);
 });
+
+test('Retry remains full sized at the minimum 10% paper scale', async ({ page }, info) => {
+  await installFault(page); await page.goto('/'); await importBook(page, fixture); await decoded(reader(page));
+  for (let step = 0; step < 10; step++) await page.getByRole('button', { name: '缩小', exact: true }).click();
+  await expect(page.getByRole('button', { name: '恢复适合宽度', exact: true })).toHaveText('11%');
+  await decoded(reader(page)); await arm(page, reader(page));
+  await page.getByRole('button', { name: '缩小', exact: true }).click();
+  const alert = await visibleFailure(page, reader(page), 1), button = alert.getByRole('button', { name: '重试此页', exact: true });
+  await expect(page.getByRole('button', { name: '恢复适合宽度', exact: true })).toHaveText('10%');
+  await assertHit(button); const bounds = await button.boundingBox(); expect(bounds!.height).toBeGreaterThanOrEqual(40);
+  await info.attach('minimum-scale-raster-failure', { body: await page.screenshot(), contentType: 'image/png' });
+  await button.click(); await recoveredScreen(page, reader(page));
+  await expect(page.getByRole('button', { name: '恢复适合宽度', exact: true })).toHaveText('10%');
+  await expect(reader(page)).toBeFocused(); expect((await state(page)).hits).toBe(1);
+});
+
+test('a background reference raster failure stays local and Retry activates only its pane', async ({ page }, info) => {
+  test.skip(['tablet', 'mobile', 'mobile-webkit'].includes(info.project.name), 'Simultaneously visible desktop reference; compact recovery is covered separately');
+  await page.setViewportSize({ width: 1440, height: 1000 }); await installFault(page); await page.goto('/');
+  await importBook(page, fixture); await decoded(reader(page));
+  await page.getByRole('button', { name: /^速翻/ }).click(); await expect(quickFlip(page)).toBeVisible();
+  await page.keyboard.press('n'); await expect(page.locator('[data-floating-window]')).toHaveCount(1);
+  await page.getByRole('combobox', { name: '工作区布局' }).selectOption('grid');
+  const reference = page.getByRole('region', { name: '参考阅读区，第 1 页', exact: true });
+  await decoded(reference); await reader(page).focus(); await page.keyboard.press('ArrowRight'); await decoded(reader(page));
+  await expect(page.locator('header')).toContainText('第 2 页');
+  const documentNode = await reference.locator('.react-pdf__Document').elementHandle();
+  await arm(page, reference); await page.setViewportSize({ width: 1280, height: 1000 });
+  const alert = await visibleFailure(page, reference, 1);
+  await expect(reader(page)).toBeFocused(); await decoded(reader(page));
+  await expect(controls(reader(page)).getByRole('alert')).toHaveCount(0);
+  const before = await checkpoint(page), beforeFault = await state(page);
+  await alert.getByRole('button', { name: '重试此页', exact: true }).click();
+  const screenshot = await recoveredScreen(page, reference); await expect(reference).toBeFocused();
+  const after = await checkpoint(page), referenceWindow = after.windows.find(window => window.id !== 'main')!;
+  expect(after.activeWindowId).toBe(referenceWindow.id); expect(referenceWindow.pageNumber).toBe(1);
+  expect(after.currentPage).toBe(2); expect(after.heldPages).toEqual(before.heldPages);
+  expect(after.windows.map(window => ({ ...window, isActive: false }))).toEqual(before.windows.map(window => ({ ...window, isActive: false })));
+  expect(after.documentId).toBe(before.documentId); expect(await sourceBytesHash(page)).toBe(sourceHash);
+  expect(await documentNode!.evaluate(element => element.isConnected)).toBe(true);
+  expect((await state(page)).workers).toBe(beforeFault.workers); expect((await state(page)).hits).toBe(1);
+  await expect(controls(reader(page)).getByRole('alert')).toHaveCount(0);
+  await info.attach('reference-raster-recovery', { body: screenshot, contentType: 'image/png' });
+});

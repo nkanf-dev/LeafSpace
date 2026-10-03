@@ -28,7 +28,7 @@ for (const origin of ['main', 'reference'] as const) {
     const region = page.locator(`[data-window-id="${id}"] [role="region"]`);
     for (let index = 0; index < 5; index++) {
       const width = await region.locator('canvas').evaluate(element => element.getBoundingClientRect().width);
-      await region.locator('..').getByRole('button', { name: '放大', exact: true }).click();
+      await region.locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '放大', exact: true }).click();
       await expect.poll(() => region.locator('canvas').evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(width * 1.15);
     }
     await region.evaluate(element => element.scrollTo(120, 350));
