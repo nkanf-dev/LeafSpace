@@ -526,7 +526,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, thumbnailActions,
 
   return (
     <div ref={overlayRef} inert={interactionSuspended} role="dialog" aria-modal="true" aria-label="速翻视图" tabIndex={-1} className="fixed inset-0 z-[3000] overflow-hidden" onWheelCapture={handleWheelCapture}>
-      <div className="absolute inset-0 bg-[rgba(251,250,248,0.7)] backdrop-blur-[40px]" onClick={onClose} />
+      <div className="absolute inset-0 bg-[rgba(251,250,248,0.92)] backdrop-blur-[40px]" onClick={onClose} />
       <div className="relative z-10 flex h-dvh w-full flex-col px-3 py-4 sm:px-6 sm:py-6">
         <div className="relative mb-3 shrink-0 text-center sm:mb-5">
           <button type="button" aria-label="关闭速翻" className="absolute right-0 top-0 p-3 text-stone-700" onClick={onClose}><X size={22} /></button>
