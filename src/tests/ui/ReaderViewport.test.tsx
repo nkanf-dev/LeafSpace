@@ -470,6 +470,33 @@ describe('ReaderViewport', () => {
     expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 212, scrollTop: 382 });
   });
 
+  it('keeps the paper point through alternating toolbar zoom when scroll writes truncate to integers', () => {
+    vi.stubGlobal('innerWidth', 1000);
+    loadDocument(3, 1.2 ** 5); render(<ReaderViewport isMain windowId="main" />);
+    const region = readerRegion(); const geometry = mockScrollGeometry(region);
+    geometry({ width: 348, height: 300, scrollWidth: 2000, scrollHeight: 2400 });
+    let left = 150, top = 300;
+    Object.defineProperties(region, {
+      scrollLeft: { configurable: true, get: () => left, set: (value: number) => { left = Math.trunc(value); } },
+      scrollTop: { configurable: true, get: () => top, set: (value: number) => { top = Math.trunc(value); } },
+    });
+    act(() => resizeCallbacks.forEach(callback => callback()));
+    act(() => renderLifecycle.loads.at(-1)!({ pageNumber: 3, getViewport: () => ({ width: 420, height: 594 }) } as unknown as PDFPageProxy));
+    const frame = region.querySelector<HTMLElement>('.w-max')!;
+    vi.spyOn(region, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 348, 300));
+    vi.spyOn(frame, 'getBoundingClientRect').mockImplementation(() => new DOMRect(40 - region.scrollLeft, 60 - region.scrollTop, parseFloat(frame.style.width), parseFloat(frame.style.height)));
+    fireEvent.scroll(region, { target: { scrollLeft: 150, scrollTop: 300 } });
+    const point = () => ({ x: (region.scrollLeft + 174 - 41) / (parseFloat(frame.style.width) - 2),
+      y: (region.scrollTop + 150 - 61) / (parseFloat(frame.style.height) - 2) });
+    const before = point();
+    for (const name of ['放大', '缩小', '放大', '缩小']) {
+      fireEvent.click(screen.getByRole('button', { name, exact: true }));
+      const after = point();
+      expect(Math.abs(after.x - before.x) * (parseFloat(frame.style.width) - 2)).toBeLessThanOrEqual(2);
+      expect(Math.abs(after.y - before.y) * (parseFloat(frame.style.height) - 2)).toBeLessThanOrEqual(2);
+    }
+  });
+
   it('accumulates a wheel burst before React commits without replacing its original anchor', () => {
     loadDocument(); render(<ReaderViewport isMain windowId="main" />);
     const region = readerRegion(); mockScrollGeometry(region);
