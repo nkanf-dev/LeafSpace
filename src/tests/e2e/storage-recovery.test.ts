@@ -31,6 +31,7 @@ test('PDF quota failure stays visible across save and leave attempts, then recov
   await page.goto('/');
   await importBook(page);
   await expect(page.getByRole('alert')).toContainText('PDF 尚未保存到本机');
+  await testInfo.attach('pdf-quota-initial-guidance', { body: await page.screenshot(), contentType: 'image/png' });
   await navigateTo(page, 9);
   await page.getByRole('button', { name: '保存现场', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('PDF 尚未保存到本机');
