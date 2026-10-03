@@ -441,15 +441,18 @@ describe('ReaderViewport', () => {
   it('captures an undelivered scroll before creating the next wheel zoom anchor', async () => {
     loadDocument(); render(<ReaderViewport isMain windowId="main" />);
     const region = readerRegion(); mockScrollGeometry(region);
+    act(() => resizeCallbacks.forEach(callback => callback()));
+    act(() => renderLifecycle.loads.at(-1)!({ pageNumber: 3, getViewport: () => ({ width: 612, height: 792 }) } as unknown as PDFPageProxy));
     const frame = region.querySelector<HTMLElement>('.w-max')!;
     vi.spyOn(region, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 400, 300));
-    vi.spyOn(frame, 'getBoundingClientRect').mockImplementation(() => new DOMRect(40 - region.scrollLeft, 40 - region.scrollTop, 612, 792));
+    vi.spyOn(frame, 'getBoundingClientRect').mockImplementation(() => new DOMRect(40 - region.scrollLeft, 40 - region.scrollTop, parseFloat(frame.style.width), parseFloat(frame.style.height)));
+    const beforeWidth = parseFloat(frame.style.width) - 2, beforeHeight = parseFloat(frame.style.height) - 2;
     region.scrollLeft = 100; region.scrollTop = 200;
     fireEvent.wheel(region, { deltaY: -100, ctrlKey: true, clientX: 200, clientY: 150 });
     fireEvent.click(screen.getByRole('button', { name: 'Complete PDF render' }));
     await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); });
-    expect(region.scrollLeft).toBeCloseTo(139);
-    expect(region.scrollTop).toBeCloseTo(246.5);
+    expect(region.scrollLeft).toBeCloseTo(41 + (100 + 200 - 41) / beforeWidth * (parseFloat(frame.style.width) - 2) - 200);
+    expect(region.scrollTop).toBeCloseTo(41 + (200 + 150 - 41) / beforeHeight * (parseFloat(frame.style.height) - 2) - 150);
   });
 
   it('reserves paper geometry and anchors toolbar zoom before paint even when a scrollbar reduces the viewport', () => {
@@ -461,13 +464,15 @@ describe('ReaderViewport', () => {
     vi.spyOn(region, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 400, 300));
     vi.spyOn(frame, 'getBoundingClientRect').mockImplementation(() => new DOMRect(40 - region.scrollLeft, 60 - region.scrollTop, parseFloat(frame.style.width), parseFloat(frame.style.height)));
     fireEvent.scroll(region, { target: { scrollLeft: 150, scrollTop: 300 } });
-    const width = parseFloat(frame.style.width);
+    const width = parseFloat(frame.style.width), height = parseFloat(frame.style.height);
     Object.defineProperty(region, 'clientHeight', { configurable: true, get: () => useBookStore.getState().scale > 1 ? 292 : 300 });
     fireEvent.click(screen.getByRole('button', { name: '放大' }));
     expect(parseFloat(frame.style.width)).toBe(Math.floor((width - 2) * 1.2) + 2);
-    expect(region.scrollLeft).toBeCloseTo(212);
-    expect(region.scrollTop).toBeCloseTo(382);
-    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 212, scrollTop: 382 });
+    const left = 41 + (150 + 200 - 41) / (width - 2) * (parseFloat(frame.style.width) - 2) - 200;
+    const top = 61 + (300 + 150 - 61) / (height - 2) * (parseFloat(frame.style.height) - 2) - 146;
+    expect(region.scrollLeft).toBeCloseTo(left);
+    expect(region.scrollTop).toBeCloseTo(top);
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: left, scrollTop: top });
   });
 
   it('keeps the paper point through alternating toolbar zoom when scroll writes truncate to integers', () => {
@@ -506,12 +511,13 @@ describe('ReaderViewport', () => {
     vi.spyOn(region, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 400, 300));
     vi.spyOn(frame, 'getBoundingClientRect').mockImplementation(() => new DOMRect(40 - region.scrollLeft, 60 - region.scrollTop, parseFloat(frame.style.width), parseFloat(frame.style.height)));
     fireEvent.scroll(region, { target: { scrollLeft: 100, scrollTop: 200 } });
+    const beforeWidth = parseFloat(frame.style.width) - 2, beforeHeight = parseFloat(frame.style.height) - 2;
     act(() => {
       for (let i = 0; i < 3; i++) region.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -120, clientX: 200, clientY: 150 }));
     });
     expect(useBookStore.getState().scale).toBeCloseTo(1.15 ** 3);
-    expect(region.scrollLeft).toBeCloseTo(100 + 260 * (1.15 ** 3 - 1));
-    expect(region.scrollTop).toBeCloseTo(200 + 290 * (1.15 ** 3 - 1));
+    expect(region.scrollLeft).toBeCloseTo(41 + 259 / beforeWidth * (parseFloat(frame.style.width) - 2) - 200);
+    expect(region.scrollTop).toBeCloseTo(61 + 289 / beforeHeight * (parseFloat(frame.style.height) - 2) - 150);
   });
 
   it.each([[4, '放大'], [0.1, '缩小']] as const)('disables %s-scale zoom at the supported boundary', (scale, name) => {
