@@ -201,6 +201,7 @@ setActiveWindow(windowId: string): void
 navigateActive(pageNumber: number): void
 setLayout(layout: 'floating' | 'split' | 'grid'): void
 swapWithMain(windowId: string): void
+restoreWindowPosition(windowId: string, position: Pick<ReaderWindow, 'pageNumber' | 'title' | 'viewport'>): void
 ```
 
 ### 5.5 Workspace actions
@@ -239,6 +240,8 @@ clearWorkspace(documentId: string): Promise<void>
 6. 新建窗口上限为 5（含主窗），新增夹页上限为 12；恢复旧现场不截断既有页面。
 7. 速翻会冻结进入时的窗口上下文，确认跳页回到该窗口；打开新窗口则激活并聚焦新窗。
 8. 小屏通过页面标签切换活动窗口，隐藏窗口不得把其滚动偏移覆盖为零。
+9. 桌面夹页单击的 220ms 延时只用于避免快速双击触发多余渲染；原窗口阅读意图由 prepareHeldRead 的一次性事务保护。原页、视口、活动窗口或文档发生新变化后，旧事务永久失效。双击仅回退自身仍有效的单击，不替换整个工作区。
+10. restoreWindowPosition 先执行正常页码切换，再精确恢复该窗口视口。ReaderViewport 只在文档/页码边界重置 DOM 滚动基线，不在同页缩放或尺寸变化时丢弃用户滚动意图。
 
 ---
 

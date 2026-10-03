@@ -185,6 +185,15 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   }, [captureScrollIntent, syncPanTargetToContainer]);
 
   useLayoutEffect(() => {
+    // A new paper owns a new scroll intent. Old-paper DOM movement or a queued
+    // layout clamp must not overwrite an explicitly restored page position.
+    const container = containerRef.current;
+    if (container) lastAppliedScroll.current = { left: container.scrollLeft, top: container.scrollTop };
+    zoomPivot.current = null;
+    cancelPanAnimation();
+  }, [documentUrl, activePage, cancelPanAnimation]);
+
+  useLayoutEffect(() => {
     currentRenderToken.current = renderToken;
     renderGeneration.current += 1;
     if (zoomCorrectionFrame.current !== null) window.cancelAnimationFrame(zoomCorrectionFrame.current);
