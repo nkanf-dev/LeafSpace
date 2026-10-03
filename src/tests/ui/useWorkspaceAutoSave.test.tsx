@@ -3,11 +3,14 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useWorkspaceAutoSave } from '../../hooks/useWorkspaceAutoSave';
 
-type Input = Parameters<typeof useWorkspaceAutoSave>[0];
+type Input = Omit<Parameters<typeof useWorkspaceAutoSave>[0], 'readCurrent'>;
+function useTestAutoSave(input: Input) {
+  useWorkspaceAutoSave({ ...input, readCurrent: () => input });
+}
 
 function initialInput(): Input {
   return {
-    documentId: 'book-a', currentPage: 1, scale: 1, heldPages: [], windows: [],
+    documentId: 'book-a', sessionId: 1, currentSnapshot: null, currentPage: 1, scale: 1, heldPages: [], windows: [],
     activeWindowId: 'main', enabled: true, saveWorkspace: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -25,7 +28,7 @@ describe('workspace autosave', () => {
 
   it('saves once after the debounce and stays idle after saving completes', () => {
     const input = initialInput();
-    const { rerender } = renderHook(useWorkspaceAutoSave, { initialProps: input });
+    const { rerender } = renderHook(useTestAutoSave, { initialProps: input });
     advance(499);
     expect(input.saveWorkspace).not.toHaveBeenCalled();
     advance(1);
@@ -38,7 +41,7 @@ describe('workspace autosave', () => {
 
   it('debounces rapid changes and saves again for a new reading revision', () => {
     const input = initialInput();
-    const { rerender } = renderHook(useWorkspaceAutoSave, { initialProps: input });
+    const { rerender } = renderHook(useTestAutoSave, { initialProps: input });
     advance(300);
     rerender({ ...input, currentPage: 2 });
     advance(300);
@@ -53,7 +56,7 @@ describe('workspace autosave', () => {
 
   it('waits for import/restore hydration to finish before saving', () => {
     const input = initialInput();
-    const { rerender } = renderHook(useWorkspaceAutoSave, {
+    const { rerender } = renderHook(useTestAutoSave, {
       initialProps: { ...input, enabled: false },
     });
     advance(2_000);
@@ -65,7 +68,7 @@ describe('workspace autosave', () => {
 
   it('retains edits made while a previous save is in progress', () => {
     const input = initialInput();
-    const { rerender } = renderHook(useWorkspaceAutoSave, { initialProps: input });
+    const { rerender } = renderHook(useTestAutoSave, { initialProps: input });
     advance();
     rerender({ ...input, enabled: false });
     rerender({ ...input, currentPage: 2, enabled: false });
@@ -78,7 +81,7 @@ describe('workspace autosave', () => {
 
   it('cancels pending saves when blocked and does not retry unchanged failed saves', () => {
     const input = initialInput();
-    const { rerender } = renderHook(useWorkspaceAutoSave, { initialProps: input });
+    const { rerender } = renderHook(useTestAutoSave, { initialProps: input });
     advance(300);
     rerender({ ...input, enabled: false });
     advance(2_000);
@@ -95,7 +98,7 @@ describe('workspace autosave', () => {
   it.each(['scale', 'heldPages', 'windows', 'activeWindowId'] as const)(
     'persists changes to %s even when the page stays the same', (field) => {
       const input = initialInput();
-      const { rerender } = renderHook(useWorkspaceAutoSave, { initialProps: input });
+      const { rerender } = renderHook(useTestAutoSave, { initialProps: input });
       advance();
       const updates = { scale: 1.5, heldPages: [], windows: [], activeWindowId: 'reference' };
       rerender({ ...input, [field]: updates[field] });
@@ -106,7 +109,7 @@ describe('workspace autosave', () => {
 
   it('cancels the old document timer and resets tracking when the document closes', () => {
     const input = initialInput();
-    const { rerender } = renderHook(useWorkspaceAutoSave, { initialProps: input });
+    const { rerender } = renderHook(useTestAutoSave, { initialProps: input });
     advance(300);
     rerender({ ...input, documentId: 'book-b' });
     advance();
@@ -121,13 +124,13 @@ describe('workspace autosave', () => {
   it('cleans up on unmount and tolerates StrictMode effect replay', () => {
     const input = initialInput();
     const wrapper = ({ children }: ComponentProps<typeof StrictMode>) => <StrictMode>{children}</StrictMode>;
-    const { unmount } = renderHook(useWorkspaceAutoSave, { initialProps: input, wrapper });
+    const { unmount } = renderHook(useTestAutoSave, { initialProps: input, wrapper });
     advance();
     expect(input.saveWorkspace).toHaveBeenCalledTimes(1);
     unmount();
     advance(2_000);
     expect(input.saveWorkspace).toHaveBeenCalledTimes(1);
-    const second = renderHook(useWorkspaceAutoSave, { initialProps: input });
+    const second = renderHook(useTestAutoSave, { initialProps: input });
     second.unmount();
     advance();
     expect(input.saveWorkspace).toHaveBeenCalledTimes(1);
