@@ -83,8 +83,11 @@ async function durableSourceHash(page: Page) {
 }
 async function paperPoint(region: Locator) {
   return region.evaluate(element => {
-    const bounds = element.getBoundingClientRect(), paper = element.querySelector('canvas')!.getBoundingClientRect();
-    return { x: (bounds.left + element.clientWidth / 2 - paper.left) / paper.width,
+    const bounds = element.getBoundingClientRect(), canvas = element.querySelector('canvas')!, paper = canvas.getBoundingClientRect();
+    const frame = element.querySelector('.w-max')!.getBoundingClientRect();
+    return { canvasLeft: paper.left, canvasTop: paper.top, frameLeft: frame.left, frameTop: frame.top, frameWidth: frame.width, frameHeight: frame.height,
+      scrollLeft: element.scrollLeft, scrollTop: element.scrollTop, clientWidth: element.clientWidth, clientHeight: element.clientHeight,
+      bitmapWidth: canvas.width, bitmapHeight: canvas.height, dpr: devicePixelRatio, x: (bounds.left + element.clientWidth / 2 - paper.left) / paper.width,
       y: (bounds.top + element.clientHeight / 2 - paper.top) / paper.height, width: paper.width, height: paper.height };
   });
 }
@@ -92,7 +95,9 @@ async function paperPoint(region: Locator) {
 async function expectAnchor(region: Locator, anchor: { x: number; y: number }) {
   await expect.poll(async () => {
     const after = await paperPoint(region);
-    return Math.max(Math.abs(after.x - anchor.x) * after.width, Math.abs(after.y - anchor.y) * after.height);
+    const pixels = Math.max(Math.abs(after.x - anchor.x) * after.width, Math.abs(after.y - anchor.y) * after.height);
+    // Normalize IEEE-754 noise such as2.0000000000000107, not physical pixel drift.
+    return Math.round(pixels * 1e6) / 1e6;
   }, { message: 'The same mixed-page paper point stays at the zoom anchor' }).toBeLessThanOrEqual(2);
 }
 
@@ -169,7 +174,11 @@ test('a tall raster page remains decoded at maximum zoom and returns to fit', as
   for (let index = 0; index < 8; index++) {
     await reader(page).locator('..').getByRole('button', { name: '放大', exact: true }).click();
     await expect.poll(() => reader(page).locator('canvas').evaluate((canvas, width) => Math.abs(canvas.getBoundingClientRect().width - width), Math.floor(fitWidth * Math.min(4, 1.2 ** (index + 1))))).toBeLessThanOrEqual(1);
-    if (index < 7) { await decoded(reader(page), 9); await expectAnchor(reader(page), anchor); }
+    if (index < 7) {
+      await decoded(reader(page), 9);
+      await info.attach(`tall-anchor-step-${index + 1}`, { body: JSON.stringify({ origin: anchor, current: await paperPoint(reader(page)) }, null, 2), contentType: 'application/json' });
+      await expectAnchor(reader(page), anchor);
+    }
   }
   await expect(reader(page).locator('..').getByRole('button', { name: '放大', exact: true })).toBeDisabled();
   await expect.poll(() => reader(page).locator('canvas').evaluate((canvas, width) => Math.abs(canvas.getBoundingClientRect().width - width * 4), fitWidth)).toBeLessThanOrEqual(1);
@@ -196,4 +205,28 @@ test('a tall raster page remains decoded at maximum zoom and returns to fit', as
   await reader(page).locator('..').getByRole('button', { name: '恢复适合宽度', exact: true }).click(); await decoded(reader(page), 9);
   await expect.poll(() => reader(page).evaluate(element => element.scrollWidth - element.clientWidth)).toBe(0);
   await goTo(page, 1); await decoded(reader(page), 1);
+});
+
+
+test('one zoom after scrolling deep into a tall page preserves its actual displayed point', async ({ page }, info) => {
+  test.setTimeout(90_000); await page.goto('/'); await importBook(page, fixture); await goTo(page, 9);
+  const baseWidth = (await decoded(reader(page), 9)).frameWidth - 2;
+  for (let step = 1; step <= 4; step++) {
+    await reader(page).locator('..').getByRole('button', { name: '放大', exact: true }).click();
+    await expect.poll(() => reader(page).locator('canvas').evaluate((canvas, width) => Math.abs(canvas.getBoundingClientRect().width - width), Math.floor(baseWidth * 1.2 ** step))).toBeLessThanOrEqual(1);
+    await decoded(reader(page), 9);
+  }
+  await reader(page).evaluate(element => {
+    const bounds = element.getBoundingClientRect(), paper = element.querySelector('canvas')!.getBoundingClientRect();
+    element.scrollTop = element.scrollTop + paper.top - bounds.top + paper.height * .85 - element.clientHeight / 2;
+  });
+  await expect.poll(async () => Math.abs((await paperPoint(reader(page))).y - .85)).toBeLessThan(.001);
+  const anchor = await paperPoint(reader(page));
+  expect(await reader(page).evaluate(element => element.scrollTop > 0 && element.scrollTop < element.scrollHeight - element.clientHeight - 10)).toBe(true);
+  await reader(page).locator('..').getByRole('button', { name: '放大', exact: true }).click();
+  await expect.poll(() => reader(page).locator('canvas').evaluate((canvas, width) => Math.abs(canvas.getBoundingClientRect().width - width), Math.floor(baseWidth * 1.2 ** 5))).toBeLessThanOrEqual(1);
+  await decoded(reader(page), 9);
+  await info.attach('deep-tall-anchor-geometry', { body: JSON.stringify({ before: anchor, after: await paperPoint(reader(page)) }, null, 2), contentType: 'application/json' });
+  await info.attach('deep-tall-anchor-screen', { body: await page.screenshot(), contentType: 'image/png' });
+  await expectAnchor(reader(page), anchor);
 });
