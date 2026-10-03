@@ -1,4 +1,5 @@
 import type { ComponentProps } from 'react';
+import type { PDFPageProxy } from 'pdfjs-dist';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReaderViewport } from '../../components/reader/ReaderViewport';
@@ -6,14 +7,15 @@ import { useBookStore } from '../../stores/bookStore';
 import { heldStore } from '../../stores/heldStore';
 import { windowStore } from '../../stores/windowStore';
 
-const renderLifecycle = vi.hoisted(() => ({ callbacks: [] as (() => void)[] }));
+const renderLifecycle = vi.hoisted(() => ({ callbacks: [] as (() => void)[], loads: [] as ((page: PDFPageProxy) => void)[] }));
 
 // Exercise reader behavior against real stores without a canvas/PDF worker.
 vi.mock('react-pdf', () => ({
   pdfjs: { GlobalWorkerOptions: {}, version: 'test' },
   Document: ({ children }: ComponentProps<'div'>) => <div>{children}</div>,
-  Page: ({ pageNumber, scale, onRenderSuccess }: { pageNumber: number; scale: number; onRenderSuccess: () => void }) => {
+  Page: ({ pageNumber, scale, onRenderSuccess, onLoadSuccess }: { pageNumber: number; scale: number; onRenderSuccess: () => void; onLoadSuccess: (page: PDFPageProxy) => void }) => {
     renderLifecycle.callbacks.push(onRenderSuccess);
+    renderLifecycle.loads.push(onLoadSuccess);
     return <div data-testid="pdf-page" data-page={pageNumber} data-scale={scale}><button onClick={onRenderSuccess}>Complete PDF render</button></div>;
   },
 }));
@@ -54,6 +56,7 @@ const resizeCallbacks: (() => void)[] = [];
 describe('ReaderViewport', () => {
   beforeEach(() => {
     renderLifecycle.callbacks.length = 0;
+    renderLifecycle.loads.length = 0;
     resizeCallbacks.length = 0;
     vi.stubGlobal('ResizeObserver', class {
       constructor(callback: () => void) { resizeCallbacks.push(callback); }
@@ -290,6 +293,41 @@ describe('ReaderViewport', () => {
     await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); });
     expect(region.scrollLeft).toBeCloseTo(139);
     expect(region.scrollTop).toBeCloseTo(246.5);
+  });
+
+  it('reserves paper geometry and anchors toolbar zoom before paint even when a scrollbar reduces the viewport', () => {
+    loadDocument(); render(<ReaderViewport isMain windowId="main" />);
+    const region = readerRegion(); mockScrollGeometry(region);
+    act(() => resizeCallbacks.forEach(callback => callback()));
+    act(() => renderLifecycle.loads.at(-1)!({ pageNumber: 3, getViewport: () => ({ width: 612, height: 792 }) } as unknown as PDFPageProxy));
+    const frame = region.querySelector<HTMLElement>('.w-max')!;
+    vi.spyOn(region, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 400, 300));
+    vi.spyOn(frame, 'getBoundingClientRect').mockImplementation(() => new DOMRect(40 - region.scrollLeft, 60 - region.scrollTop, parseFloat(frame.style.width), parseFloat(frame.style.height)));
+    fireEvent.scroll(region, { target: { scrollLeft: 150, scrollTop: 300 } });
+    const width = parseFloat(frame.style.width);
+    Object.defineProperty(region, 'clientHeight', { configurable: true, get: () => useBookStore.getState().scale > 1 ? 292 : 300 });
+    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    expect(parseFloat(frame.style.width)).toBe(Math.floor((width - 2) * 1.2) + 2);
+    expect(region.scrollLeft).toBeCloseTo(212);
+    expect(region.scrollTop).toBeCloseTo(382);
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 212, scrollTop: 382 });
+  });
+
+  it('accumulates a wheel burst before React commits without replacing its original anchor', () => {
+    loadDocument(); render(<ReaderViewport isMain windowId="main" />);
+    const region = readerRegion(); mockScrollGeometry(region);
+    act(() => resizeCallbacks.forEach(callback => callback()));
+    act(() => renderLifecycle.loads.at(-1)!({ pageNumber: 3, getViewport: () => ({ width: 612, height: 792 }) } as unknown as PDFPageProxy));
+    const frame = region.querySelector<HTMLElement>('.w-max')!;
+    vi.spyOn(region, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 400, 300));
+    vi.spyOn(frame, 'getBoundingClientRect').mockImplementation(() => new DOMRect(40 - region.scrollLeft, 60 - region.scrollTop, parseFloat(frame.style.width), parseFloat(frame.style.height)));
+    fireEvent.scroll(region, { target: { scrollLeft: 100, scrollTop: 200 } });
+    act(() => {
+      for (let i = 0; i < 3; i++) region.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -120, clientX: 200, clientY: 150 }));
+    });
+    expect(useBookStore.getState().scale).toBeCloseTo(1.15 ** 3);
+    expect(region.scrollLeft).toBeCloseTo(100 + 260 * (1.15 ** 3 - 1));
+    expect(region.scrollTop).toBeCloseTo(200 + 290 * (1.15 ** 3 - 1));
   });
 
   it.each([[4, '放大'], [0.1, '缩小']] as const)('disables %s-scale zoom at the supported boundary', (scale, name) => {
