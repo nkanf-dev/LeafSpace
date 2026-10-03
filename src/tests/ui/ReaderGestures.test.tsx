@@ -6,13 +6,14 @@ import { useReaderGestures } from '../../hooks/useReaderGestures';
 function Harness({ onTurn, onZoom, contextKey = 'book:1', canSwipe = true }: { onTurn: (direction: number) => void; onZoom: (scale: number, anchor: {x:number;y:number}, midpoint:{x:number;y:number}) => void; contextKey?: string; canSwipe?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
-  useReaderGestures({ containerRef, frameRef, contextKey, scale: 1, canSwipe, isActive: true, onActivate: () => {}, onTurn, onZoom });
+  useReaderGestures({ containerRef, frameRef, contextKey, scale: 1, canSwipe, isActive: true, onActivate: () => {}, getPaperBounds: () => frameRef.current?.getBoundingClientRect() ?? null, onTurn, onZoom });
   return <div ref={containerRef} data-testid="reader"><div ref={frameRef} data-testid="paper" /></div>;
 }
 function setup(overflow = false, canSwipe = true) {
   const onTurn = vi.fn(), onZoom = vi.fn();
   const view = render(<Harness onTurn={onTurn} onZoom={onZoom} canSwipe={canSwipe} />);
   const region = screen.getByTestId('reader'), paper = screen.getByTestId('paper');
+  vi.spyOn(paper, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 400, 600));
   Object.defineProperties(region, { clientWidth: { value: 400 }, clientHeight: { value: 600 }, scrollWidth: { value: overflow ? 800 : 400 } });
   const touch = (id: number, x: number, y = 200, target: EventTarget = paper) => ({ identifier: id, clientX: x, clientY: y, target });
   const event = (type: string, touches: ReturnType<typeof touch>[], changedTouches = touches) => fireEvent(region, new TouchEvent(type, { bubbles: true, cancelable: true, touches: touches as unknown as Touch[], changedTouches: changedTouches as unknown as Touch[] }));
@@ -34,9 +35,26 @@ describe('reader touch transactions', () => {
     expect(paper.style.transform).toContain('scale(2)');
     expect(onZoom).not.toHaveBeenCalled();
     event('touchend', [touch(1, 80)], [touch(2, 280)]);
-    expect(onZoom).toHaveBeenCalledExactlyOnceWith(2, { x: 150, y: 200 }, { x: 180, y: 200 });
+    expect(onZoom).toHaveBeenCalledExactlyOnceWith(2, { x: 0.375, y: 1 / 3 }, { x: 180, y: 200 });
     event('touchmove', [touch(1, 300)]); event('touchend', [], [touch(1, 300)]);
     expect(onTurn).not.toHaveBeenCalled();
+    expect(paper.style.transform).toBe('');
+  });
+  it('retains the normalized source point when canvas geometry changes during a moving pinch', () => {
+    const { event, touch, onZoom, paper } = setup();
+    vi.mocked(paper.getBoundingClientRect).mockReturnValue(new DOMRect(10, 20, 280, 540));
+    event('touchstart', [touch(1, 100), touch(2, 200)]);
+    event('touchmove', [touch(1, 80, 240), touch(2, 280, 240)]);
+    vi.mocked(paper.getBoundingClientRect).mockReturnValue(new DOMRect(-200, -100, 560, 1080));
+    event('touchend', []);
+    expect(onZoom).toHaveBeenCalledExactlyOnceWith(2, { x: 0.5, y: 1 / 3 }, { x: 180, y: 240 });
+  });
+  it('does not commit a pinch whose source paper geometry is unavailable', () => {
+    const { event, touch, onZoom, paper } = setup();
+    vi.mocked(paper.getBoundingClientRect).mockReturnValue(new DOMRect());
+    event('touchstart', [touch(1, 100), touch(2, 200)]);
+    event('touchmove', [touch(1, 50), touch(2, 250)]); event('touchend', []);
+    expect(onZoom).not.toHaveBeenCalled();
     expect(paper.style.transform).toBe('');
   });
   it.each(['touchcancel', 'blur', 'third-contact', 'context', 'Escape', ' '])('rolls back pinch on %s and allows a fresh gesture', kind => {

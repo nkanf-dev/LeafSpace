@@ -7,7 +7,7 @@ permissions:
 jobs:
   chromium:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,8 +15,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npx playwright test mixed-pages.test.ts --project=chromium --project=mobile --workers=1 --retries=0
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npx playwright test mixed-pages.test.ts zoom-position.test.ts fit-width.test.ts gesture-contract.test.ts native-touch.test.ts mouse-pan.test.ts --workers=2 --retries=0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
