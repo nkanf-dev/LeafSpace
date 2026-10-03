@@ -244,6 +244,24 @@ describe('ReaderViewport', () => {
     expect(readerRegion().scrollLeft).toBe(150); expect(readerRegion().scrollTop).toBe(300);
   });
 
+  it('does not reinterpret old-paper DOM movement as the restored page position', () => {
+    loadDocument(3);
+    render(<ReaderViewport isMain windowId="main" />);
+    mockScrollGeometry(readerRegion());
+    act(() => windowStore.getState().updateWindow('main', { pageNumber: 8 }));
+    const stale = renderLifecycle.callbacks.at(-1)!;
+    // The old paper moved/clamped before its queued scroll event was delivered.
+    readerRegion().scrollLeft = 50; readerRegion().scrollTop = 70;
+    act(() => windowStore.getState().restoreWindowPosition('main', {
+      pageNumber: 3, title: '第 3 页', viewport: { scrollLeft: 150, scrollTop: 300, scale: 1, mode: 'grab' },
+    }));
+    expect(readerRegion().scrollLeft).toBe(150); expect(readerRegion().scrollTop).toBe(300);
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 150, scrollTop: 300 });
+    act(() => stale());
+    fireEvent.scroll(readerRegion(), { target: { scrollLeft: 90, scrollTop: 200 } });
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 90, scrollTop: 200 });
+  });
+
   it('ignores stale PDF completion callbacks after scale changes and cancels queued frames', () => {
     loadDocument(); render(<ReaderViewport isMain windowId="main" />);
     const stale = renderLifecycle.callbacks.at(-1)!;

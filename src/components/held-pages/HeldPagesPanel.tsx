@@ -2,19 +2,25 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { HeldPage } from '../../types/domain';
 import { LayoutGrid, List, X, Columns2, ArrowUp, ArrowDown } from 'lucide-react';
 import { CachedThumbnail } from '../thumbnails/CachedThumbnail';
+import type { PreparedHeldRead } from '../../services/HeldReadTransaction';
 
 interface Props {
   pages: HeldPage[];
   onPageClick: (page: HeldPage) => void;
   onReadPage?: (page: HeldPage) => void;
+  onPrepareReadPage?: (page: HeldPage) => PreparedHeldRead;
+  interactionKey?: string;
   onRemovePage: (id: string, closeReferences?: boolean) => void;
   onReorder?: (fromIndex: number, toIndex: number) => void;
 }
 
-export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onReadPage, onRemovePage, onReorder }) => {
+export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onReadPage, onPrepareReadPage, interactionKey, onRemovePage, onReorder }) => {
   const [pendingRemoval, setPendingRemoval] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
   const readTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const preparedRead = useRef<{ id: string; transaction: PreparedHeldRead } | null>(null);
+  const pointerType = useRef('mouse');
+  const comparedOnClick = useRef(false);
   const removeButtons = useRef(new Map<string, HTMLButtonElement>());
   const readButtons = useRef(new Map<string, HTMLButtonElement>());
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -34,15 +40,31 @@ export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onReadPage
   const cancelPendingRead = () => {
     if (readTimer.current !== null) clearTimeout(readTimer.current);
     readTimer.current = null;
+    preparedRead.current?.transaction.dispose();
+    preparedRead.current = null;
   };
-  useEffect(() => () => { if (readTimer.current !== null) clearTimeout(readTimer.current); }, []);
+  useEffect(() => () => {
+    if (readTimer.current !== null) clearTimeout(readTimer.current);
+    readTimer.current = null;
+    preparedRead.current?.transaction.dispose(); preparedRead.current = null;
+  }, [interactionKey]);
+  useEffect(() => {
+    const resize = () => {
+      if (window.innerWidth >= 1024) return;
+      if (readTimer.current !== null) clearTimeout(readTimer.current);
+      readTimer.current = null;
+      preparedRead.current?.transaction.dispose(); preparedRead.current = null;
+    };
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
   return (
     <div className="flex h-full flex-col bg-[var(--surface)]">
       <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4 text-sm font-semibold text-stone-600">
         <h2 ref={headingRef} tabIndex={-1}>夹住的页面 ({pages.length})</h2>
         <div className="flex bg-[#f0ede9] p-0.5">
-          <button type="button" aria-label="卡片视图" title="卡片视图" aria-pressed={viewMode === 'card'} className={`p-2 ${viewMode === 'card' ? 'bg-white shadow-sm' : 'opacity-60'}`} onClick={() => setViewMode('card')}><LayoutGrid size={15} /></button>
-          <button type="button" aria-label="列表视图" title="列表视图" aria-pressed={viewMode === 'list'} className={`p-2 ${viewMode === 'list' ? 'bg-white shadow-sm' : 'opacity-60'}`} onClick={() => setViewMode('list')}><List size={15} /></button>
+          <button type="button" aria-label="卡片视图" title="卡片视图" aria-pressed={viewMode === 'card'} className={`p-2 ${viewMode === 'card' ? 'bg-white shadow-sm' : 'opacity-60'}`} onClick={() => { cancelPendingRead(); setViewMode('card'); }}><LayoutGrid size={15} /></button>
+          <button type="button" aria-label="列表视图" title="列表视图" aria-pressed={viewMode === 'list'} className={`p-2 ${viewMode === 'list' ? 'bg-white shadow-sm' : 'opacity-60'}`} onClick={() => { cancelPendingRead(); setViewMode('list'); }}><List size={15} /></button>
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -54,12 +76,27 @@ export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onReadPage
         ) : pages.map((page, index) => (
           <div key={page.id} onKeyDown={event => { if (event.key === 'Escape' && pendingRemoval === page.id) { event.preventDefault(); event.stopPropagation(); cancelRemoval(); } }} className={`relative mx-3 my-3 flex overflow-hidden border bg-white ${page.isOpen ? 'border-stone-700' : 'border-[var(--border)]'}`}>
             <div inert={pendingRemoval === page.id} className="flex min-w-0 flex-1">
-            <button ref={element => { if (element) readButtons.current.set(page.id, element); else readButtons.current.delete(page.id); }} type="button" aria-label={`阅读第 ${page.pageNumber} 页`} onClick={(event) => {
+            <button ref={element => { if (element) readButtons.current.set(page.id, element); else readButtons.current.delete(page.id); }} type="button" aria-label={`阅读第 ${page.pageNumber} 页`} onPointerDown={event => { pointerType.current = event.pointerType; }} onClick={(event) => {
+              if (event.detail > 1) return;
               cancelPendingRead();
+              comparedOnClick.current = false;
               if (event.detail === 0) (onReadPage ?? onPageClick)(page);
-              else if (event.shiftKey) onPageClick(page);
-              else if (event.detail === 1) readTimer.current = setTimeout(() => (onReadPage ?? onPageClick)(page), 220);
-            }} onDoubleClick={() => { cancelPendingRead(); onPageClick(page); }} className="flex min-w-0 flex-1 items-center text-left transition hover:bg-stone-50">
+              else if (event.shiftKey) { comparedOnClick.current = true; onPageClick(page); }
+              else if (pointerType.current !== 'mouse' || window.innerWidth < 1024) (onReadPage ?? onPageClick)(page);
+              else {
+                const transaction = onPrepareReadPage?.(page);
+                preparedRead.current = transaction ? { id: page.id, transaction } : null;
+                readTimer.current = setTimeout(() => {
+                  readTimer.current = null;
+                  if (transaction) transaction.commit();
+                  else (onReadPage ?? onPageClick)(page);
+                }, 220);
+              }
+            }} onDoubleClick={() => {
+              if (pointerType.current !== 'mouse' || window.innerWidth < 1024 || comparedOnClick.current) return;
+              if (preparedRead.current?.id === page.id) preparedRead.current.transaction.rollback();
+              cancelPendingRead(); onPageClick(page);
+            }} className="flex min-w-0 flex-1 items-center text-left transition hover:bg-stone-50">
               {viewMode === 'card' && <CachedThumbnail alt={`第 ${page.pageNumber} 页缩略图`} className="shrink-0 bg-[#f0ede9]" height={80} width={60} pageNumber={page.pageNumber} priority placeholder={<span className="p-3 text-stone-400">{page.pageNumber}</span>} />}
               <span className="min-w-0 flex-1 p-3">
                 <span className="block text-xs text-stone-500">第 {page.pageNumber} 页{page.isOpen ? ' · 已打开' : ''}</span>
@@ -72,8 +109,8 @@ export const HeldPagesPanel: React.FC<Props> = ({ pages, onPageClick, onReadPage
             <button ref={element => { if (element) removeButtons.current.set(page.id, element); else removeButtons.current.delete(page.id); }} type="button" className="self-start p-3 text-stone-400 hover:text-red-700" onClick={() => { cancelPendingRead(); if (page.linkedWindowIds.some(id => id !== 'main')) setPendingRemoval(page.id); else removePage(page.id); }} aria-label={`移除第 ${page.pageNumber} 页夹页`} title="移除"><X size={16} /></button>
             </div>
             {onReorder && <div className="flex shrink-0 flex-col justify-center border-l border-[var(--border)]">
-              <button className="p-2 text-stone-500 disabled:opacity-25" disabled={index === 0} aria-label={`上移第 ${page.pageNumber} 页夹页`} onClick={() => onReorder(index, index - 1)}><ArrowUp size={14} /></button>
-              <button className="p-2 text-stone-500 disabled:opacity-25" disabled={index === pages.length - 1} aria-label={`下移第 ${page.pageNumber} 页夹页`} onClick={() => onReorder(index, index + 1)}><ArrowDown size={14} /></button>
+              <button className="p-2 text-stone-500 disabled:opacity-25" disabled={index === 0} aria-label={`上移第 ${page.pageNumber} 页夹页`} onClick={() => { cancelPendingRead(); onReorder(index, index - 1); }}><ArrowUp size={14} /></button>
+              <button className="p-2 text-stone-500 disabled:opacity-25" disabled={index === pages.length - 1} aria-label={`下移第 ${page.pageNumber} 页夹页`} onClick={() => { cancelPendingRead(); onReorder(index, index + 1); }}><ArrowDown size={14} /></button>
             </div>}
             </div>
             {pendingRemoval === page.id && <div role="group" aria-label={`移除第 ${page.pageNumber} 页夹页选项`} className="absolute inset-0 flex flex-col justify-center gap-2 bg-[var(--surface)] p-3 text-xs">

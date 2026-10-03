@@ -20,6 +20,7 @@ export interface WindowStoreState {
   openInSplit: (pageNumber: number) => string;
   reset: () => void;
   restoreWindows: (windows: ReaderWindow[], activeWindowId?: string | null) => void;
+  restoreWindowPosition: (windowId: string, position: Pick<ReaderWindow, 'pageNumber' | 'title' | 'viewport'>) => void;
   setActiveWindow: (windowId: string) => void;
   swapWithMain: (windowId: string) => void;
   updateWindow: (windowId: string, partial: Partial<ReaderWindow>) => void;
@@ -244,6 +245,15 @@ export const useWindowStore = create<WindowStoreState>((set, get) => ({
     markHeldDiff(windows, nextWindows);
     const docked = nextWindows.filter(window => window.id !== 'main' && window.dockMode !== 'none');
     set({ windows: docked.length > 1 ? nextWindows.map(window => docked.includes(window) ? { ...window, dockMode: 'grid' } : window) : nextWindows, activeWindowId });
+  },
+
+  restoreWindowPosition: (windowId, position) => {
+    if (!get().windows.some(window => window.id === windowId)) return;
+    // Normal navigation resets offsets. Restore the exact position only after
+    // that page transition, without replacing geometry or other readers.
+    get().updateWindow(windowId, { pageNumber: position.pageNumber });
+    if (windowId === 'main') bookStore.getState().setScale(position.viewport?.scale ?? 1);
+    get().updateWindow(windowId, { title: position.title, viewport: { ...position.viewport } });
   },
 
   reset: () => {

@@ -10,6 +10,7 @@ import { useWindowStore } from '../stores/windowStore';
 import { useQuickFlipStore } from '../stores/quickFlipStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import { useWorkspaceAutoSave } from '../hooks/useWorkspaceAutoSave';
+import { prepareHeldRead } from '../services/HeldReadTransaction';
 
 function isCurrentWorkspaceSaved(documentId: string | null) {
   const snapshot = useWorkspaceStore.getState().currentSnapshot;
@@ -289,7 +290,13 @@ function App() {
           </section>
           {documentId && <aside id="held-pages-panel" aria-label="夹页列表" className={`${showHeldPages ? 'absolute inset-0 z-30 flex' : 'hidden'} min-h-0 w-full shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface)] lg:static lg:flex lg:w-[280px]`}>
             <button ref={heldBackRef} className="min-h-11 border-b border-[var(--border)] px-5 text-left text-sm lg:hidden" onClick={closeHeldPanel}>← 返回阅读</button>
-            <HeldPagesPanel pages={heldPages} onReorder={useHeldStore.getState().reorderHeldPages} onReadPage={(page) => {
+            <HeldPagesPanel pages={heldPages} interactionKey={`${documentId}:${showHeldPages}:${busy}:${isQuickFlipVisible}`} onReorder={useHeldStore.getState().reorderHeldPages} onPrepareReadPage={page => {
+              const transaction = prepareHeldRead(page.pageNumber);
+              return { ...transaction, commit: () => {
+                if (!transaction.commit()) return false;
+                closeHeldPanel(); return true;
+              } };
+            }} onReadPage={(page) => {
               const active = windows.find((win) => win.id === activeWindowId);
               if (!active || active.type === 'main') useWindowStore.getState().openInMain(page.pageNumber);
               else updateWindow(active.id, { pageNumber: page.pageNumber, title: `第 ${page.pageNumber} 页` });
