@@ -73,7 +73,7 @@ async function holdFixturePage(page: Page) {
   if (narrow) await page.getByRole('button', { name: '夹页 1', exact: true }).click();
   const image = page.getByRole('img', { name: '第 1 页缩略图', exact: true });
   await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth === 60)).toBe(true);
-  if (narrow) await page.getByRole('button', { name: '返回阅读', exact: true }).click();
+  if (narrow) await page.getByRole('button', { name: '← 返回阅读', exact: true }).click();
   await decoded(reader(page));
 }
 async function visibleFailure(page: Page, region: Locator, hits: number) {
@@ -128,12 +128,15 @@ for (const mode of ['grab', 'pointer'] as const) {
     await page.getByRole('button', { name: '放大', exact: true }).click();
     const alert = await visibleFailure(page, reader(page), 1);
     const failedCanvas = await reader(page).locator('canvas').elementHandle();
-    const before = await checkpoint(page), beforeFault = await state(page);
-    const position = await reader(page).evaluate(element => [element.scrollLeft, element.scrollTop]);
     const button = alert.getByRole('button', { name: '重试此页', exact: true });
     await reader(page).focus();
     for (let step = 0; step < 6 && !(await button.evaluate(element => element === document.activeElement)); step++) await page.keyboard.press('Tab');
     await expect(button).toBeFocused(); await expect(button).toHaveCSS('outline-style', 'solid'); await assertHit(button);
+    // Native Tab may scroll the oversized PDF link before reaching Retry. That
+    // newer reading intent, rather than the pre-navigation offset, must survive.
+    const before = await checkpoint(page), beforeFault = await state(page);
+    await button.focus();
+    const position = await reader(page).evaluate(element => [element.scrollLeft, element.scrollTop]);
     await info.attach(`raster-failure-${mode}`, { body: await page.screenshot(), contentType: 'image/png' });
     if (mode === 'grab') await page.keyboard.press('Space'); else await button.click();
     const screenshot = await recoveredScreen(page, reader(page));

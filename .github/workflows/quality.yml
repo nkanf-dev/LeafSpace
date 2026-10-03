@@ -7,7 +7,11 @@ permissions:
 jobs:
   candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, firefox, webkit]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,12 +19,19 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium firefox webkit
-      - run: npx playwright test render-recovery.test.ts zoom-position.test.ts fit-width.test.ts mixed-pages.test.ts gestures.test.ts --workers=2 --retries=0
+      - run: npx playwright install --with-deps ${{ matrix.engine }}
+      - run: |
+          if [ "${{ matrix.engine }}" = "chromium" ]; then
+            npx playwright test render-recovery.test.ts gesture-contract.test.ts native-touch.test.ts --project=chromium --project=tablet --project=mobile --workers=2 --retries=0
+          elif [ "${{ matrix.engine }}" = "webkit" ]; then
+            npx playwright test render-recovery.test.ts gesture-contract.test.ts --project=webkit --project=mobile-webkit --workers=1 --retries=0
+          else
+            npx playwright test render-recovery.test.ts gesture-contract.test.ts --project=firefox --workers=2 --retries=0
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: leafspace-render-recovery-candidate
+          name: leafspace-render-recovery-${{ matrix.engine }}
           path: |
             playwright-report/
             test-results/
