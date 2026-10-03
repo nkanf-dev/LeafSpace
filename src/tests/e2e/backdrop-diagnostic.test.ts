@@ -11,7 +11,7 @@ test('compares Quick Flip legibility with and without native backdrop filters', 
     const overlay = quickFlip(page);
     const selected = page.getByRole('button', { name: '选择第 3 页', exact: true });
     for (const number of [2, 3, 4]) {
-      const image = page.getByRole('img', { name: `第 ${number} 页缩略图`, exact: true });
+      const image = overlay.getByRole('img', { name: `第 ${number} 页缩略图`, exact: true });
       await expect(image).toBeVisible();
       expect(await image.evaluate(element => (element as HTMLImageElement).complete && (element as HTMLImageElement).naturalWidth > 0)).toBe(true);
     }
