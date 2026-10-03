@@ -106,7 +106,6 @@ for (const blockWasm of [false, true]) {
     await expectDecoded(reference.locator('canvas'));
     const resources = await decoderResourceEvidence(page, requests);
     await info.attach('reader-decoder-requests-before-assert', { body: JSON.stringify(resources, null, 2), contentType: 'application/json' });
-    console.log('READER_DECODER_REQUESTS', info.project.name, blockWasm, JSON.stringify(resources));
     expect(requests.some(url => url.endsWith('/openjpeg.wasm'))).toBe(true);
     expect(resources.observed.some(url => url.endsWith('/openjpeg_nowasm_fallback.js'))).toBe(blockWasm);
     expectLocalDecoderRequests(page, resources.observed);
@@ -142,7 +141,6 @@ for (const fallback of [false, true]) for (const blockWasm of [false, true]) {
     const evidence = await page.evaluate(() => (window as unknown as { leafspaceDecoderEvidence: { customCreated: number; customSuccess: number; customErrors: number } }).leafspaceDecoderEvidence);
     const resources = await decoderResourceEvidence(page, requests);
     await info.attach('thumbnail-decoder-before-assert', { body: JSON.stringify({ evidence, ...resources }, null, 2), contentType: 'application/json' });
-    console.log('THUMBNAIL_DECODER_EVIDENCE', info.project.name, fallback, blockWasm, JSON.stringify({ evidence, ...resources }));
     expect(evidence.customCreated).toBe(fallback ? 0 : 1);
     if (!fallback) { expect(evidence.customSuccess).toBeGreaterThan(0); expect(evidence.customErrors).toBe(0); }
     expect(requests.filter(url => url.endsWith('/openjpeg.wasm')).length).toBeGreaterThan(before);

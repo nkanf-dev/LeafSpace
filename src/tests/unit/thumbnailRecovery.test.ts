@@ -57,6 +57,7 @@ describe('thumbnail recovery', () => {
     const service = createService();
     await service.ensureThumbnail(2);
     expect(render).toHaveBeenCalledOnce();
+    expect(getDocument).toHaveBeenCalledWith(expect.objectContaining({ wasmUrl: new URL('/pdfjs/test/wasm/', document.baseURI).href, useWorkerFetch: false, isEvalSupported: false }));
     expect(thumbnailStore.getState().getEntry(service.getThumbnailKey(2))).toMatchObject({ status: 'ready', blobUrl: 'blob:thumbnail' });
   });
 
@@ -120,6 +121,7 @@ describe('thumbnail recovery', () => {
     const promise = service.ensureThumbnail(6);
     await flushMicrotasks();
     const worker = ThumbnailWorkerMock.instances[0];
+    expect(worker.requests[0]).toMatchObject({ type: 'load-document', wasmUrl: new URL('/pdfjs/test/wasm/', document.baseURI).href });
     worker.send({ type: 'document-ready', documentId: 'book' });
     await flushMicrotasks();
     const request = worker.requests.find((value): value is ThumbnailRenderRequest => value.type === 'render')!;
@@ -213,6 +215,7 @@ describe('thumbnail session retirement', () => {
     const old = service.ensureThumbnail(5);
     await flushMicrotasks();
     const worker = ThumbnailWorkerMock.instances[0];
+    expect(worker.requests[0]).toMatchObject({ type: 'load-document', wasmUrl: new URL('/pdfjs/test/wasm/', document.baseURI).href });
     worker.send({ type: 'document-ready', documentId: 'book' });
     await flushMicrotasks();
     const request = worker.requests.find((request): request is ThumbnailRenderRequest => request.type === 'render')!;
@@ -345,6 +348,7 @@ describe('thumbnail session retirement', () => {
     reopen(service); await retired;
     const fresh = service.ensureThumbnail(1); await flushMicrotasks();
     const worker = ThumbnailWorkerMock.instances[0];
+    expect(worker.requests[0]).toMatchObject({ type: 'load-document', wasmUrl: new URL('/pdfjs/test/wasm/', document.baseURI).href });
     worker.send({ type: 'document-ready', documentId: 'book' }); await flushMicrotasks();
     const request = worker.requests.find((value): value is ThumbnailRenderRequest => value.type === 'render')!;
     worker.send({ type: 'success', id: request.id, key: request.key, pageNumber: 1, width: 180, height: 270, blob: new Blob(['fresh']) });
@@ -360,6 +364,7 @@ describe('thumbnail session retirement', () => {
     const service = createService();
     const request = service.ensureThumbnail(1); await flushMicrotasks();
     const worker = ThumbnailWorkerMock.instances[0];
+    expect(worker.requests[0]).toMatchObject({ type: 'load-document', wasmUrl: new URL('/pdfjs/test/wasm/', document.baseURI).href });
     worker.send({ type: 'document-ready', documentId: 'book' });
     worker.onerror!({ message: 'worker failed after readiness' } as ErrorEvent);
     await request;

@@ -23,6 +23,10 @@ describe('worker temporary PDF canvases', () => {
     expect(canvas).toMatchObject({ width: 0, height: 0 });
     expect(target).toEqual({ canvas: null, context: null });
   });
+  it('reports unavailable 2D contexts explicitly', () => {
+    vi.stubGlobal('OffscreenCanvas', class { getContext() { return null; } });
+    expect(() => new WorkerCanvasFactory().create(64, 64)).toThrow('Worker canvas context unavailable');
+  });
   it('retains PDF.js context hints and rejects invalid or already-retired canvases', () => {
     vi.stubGlobal('OffscreenCanvas', OffscreenCanvasMock);
     const factory = new WorkerCanvasFactory({ enableHWA: true });

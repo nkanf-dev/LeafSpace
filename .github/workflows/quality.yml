@@ -15,12 +15,42 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium firefox
-      - run: npx playwright test pdf-decoders.test.ts --project=chromium --project=firefox --workers=1 --retries=0 --repeat-each=2 --grep 'thumbnail decoder native WASM works in the custom worker|JPEG2000 raster decodes in the main and reference reader with local JavaScript fallback'
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npx playwright test pdf-decoders.test.ts document-retirement.test.ts --workers=2 --retries=0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: leafspace-pdf-decoder-evidence
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+
+  subpath:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: |
+          npx vite build --base=/leafspace-test/
+          npx vite preview --base=/leafspace-test/ --host 127.0.0.1 --port 4173 --strictPort > /tmp/subpath-preview.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4173/leafspace-test/ >/dev/null; then break; fi
+            sleep 1
+          done
+          PLAYWRIGHT_BASE_URL=http://127.0.0.1:4173/leafspace-test/ npx playwright test pdf-decoders.test.ts --project=chromium --workers=1 --retries=0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: leafspace-pdf-decoder-subpath-evidence
           path: |
             playwright-report/
             test-results/
