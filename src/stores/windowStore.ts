@@ -196,8 +196,11 @@ export const useWindowStore = create<WindowStoreState>((set, get) => ({
   },
 
   setActiveWindow: (windowId) => {
-    const { windows } = get();
+    const { windows, activeWindowId } = get();
     if (!windows.some((window) => window.id === windowId)) return;
+    // Overlapping pointer/focus handlers must not dirty or re-debounce a saved pane.
+    // Keep normalizing inconsistent flags even when the active id already matches.
+    if (activeWindowId === windowId && windows.every(window => window.isActive === (window.id === windowId))) return;
     set({
       activeWindowId: windowId,
       windows: windows.map(w => ({ ...w, isActive: w.id === windowId }))
