@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 type Point = { x: number; y: number };
 type Gesture =
   | { kind: 'swipe'; id: number; start: Point; last: Point; time: number }
-  | { kind: 'pinch'; ids: number[]; distance: number; scale: number; frame: Point; anchor: Point; midpoint: Point; nextScale: number }
+  | { kind: 'pinch'; ids: number[]; distance: number; scale: number; frame: Point; anchor: Point; paperPoint: Point; midpoint: Point; nextScale: number }
   | { kind: 'blocked' }
   | { kind: 'native' };
 
@@ -16,7 +16,9 @@ interface Options {
   isActive: boolean;
   onActivate: () => void;
   onTurn: (direction: number) => void;
-  onZoom: (scale: number, anchor: Point, midpoint: Point) => void;
+  getPaperBounds: () => { left: number; top: number; width: number; height: number } | null;
+  // The source point is normalized to the untransformed paper at pinch start.
+  onZoom: (scale: number, paperPoint: Point, midpoint: Point) => void;
 }
 const point = (touch: Touch): Point => ({ x: touch.clientX, y: touch.clientY });
 const midpoint = (a: Touch, b: Touch): Point => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 });
@@ -62,11 +64,14 @@ export function useReaderGestures(options: Options) {
         const [a, b] = touches;
         const center = midpoint(a, b);
         const rect = frame.getBoundingClientRect();
+        const paper = latest.current.getPaperBounds();
+        if (!paper?.width || !paper.height) { cancel(); gesture = { kind: 'blocked' }; return; }
+        const paperPoint = { x: (center.x - paper.left) / paper.width, y: (center.y - paper.top) / paper.height };
         const span = distance(a, b);
         if (span < 12) { gesture = { kind: 'blocked' }; return; }
         clearPreview();
         gesture = { kind: 'pinch', ids: [a.identifier, b.identifier], distance: span, scale: latest.current.scale, nextScale: latest.current.scale,
-          frame: { x: rect.left, y: rect.top }, anchor: { x: center.x - rect.left, y: center.y - rect.top }, midpoint: center };
+          paperPoint, frame: { x: rect.left, y: rect.top }, anchor: { x: center.x - rect.left, y: center.y - rect.top }, midpoint: center };
         event.preventDefault();
         return;
       }
@@ -114,7 +119,7 @@ export function useReaderGestures(options: Options) {
         // Once a pinch ends, remaining fingers cannot become a swipe.
         gesture = event.touches.length ? { kind: 'blocked' } : null;
         if (Math.abs(completed.nextScale - completed.scale) > 0.0001) latest.current.onZoom(completed.nextScale,
-          { x: completed.anchor.x / completed.scale, y: completed.anchor.y / completed.scale }, completed.midpoint);
+          completed.paperPoint, completed.midpoint);
         suppressClickUntil = performance.now() + 600;
       } else if (!event.touches.length) {
         gesture = null;

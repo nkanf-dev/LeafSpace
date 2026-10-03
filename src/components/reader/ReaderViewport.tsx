@@ -24,6 +24,13 @@ interface Props {
 }
 
 type InteractionMode = 'grab' | 'pointer';
+type PaperPoint = { x: number; y: number };
+type ZoomAnchor = {
+  point: PaperPoint;
+  target: PaperPoint;
+  centered: boolean;
+  layout: { left: number; top: number; width: number; height: number };
+};
 
 export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, windowId, subscribeInterruption }) => {
   // PDF.js defaults to enableHWA:false and requests this context hint. Context
@@ -75,8 +82,11 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   const localViewportEcho = useRef<ViewportState | undefined>(undefined);
   useLayoutEffect(() => { viewportRef.current = currentWindow?.viewport; }, [currentWindow?.viewport]);
   
-  // 用于存储缩放中心的物理参考点
-  const zoomPivot = useRef<{ x: number, y: number, frameX: number, frameY: number, oldScale: number; centered?: boolean } | null>(null);
+  // Keep the exact paper point across uninterrupted zooms. Re-capturing rounded
+  // scroll positions at each step compounds even subpixel errors on tall pages.
+  const zoomAnchor = useRef<ZoomAnchor | null>(null);
+  const zoomPivot = useRef<{ anchor: ZoomAnchor; targetScale: number } | null>(null);
+  const cancelZoom = useCallback(() => { zoomPivot.current = null; zoomAnchor.current = null; }, []);
   const zoomCorrectionFrame = useRef<number | null>(null);
 
   useEffect(() => {
@@ -151,12 +161,12 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     // gesture synchronously, including an animation still settling after release.
     localViewportEcho.current = undefined;
     cancelPanning();
-    zoomPivot.current = null;
+    cancelZoom();
     const container = containerRef.current;
     if (container) lastAppliedScroll.current = { left: container.scrollLeft, top: container.scrollTop };
-  }), [cancelPanning, windowId]);
+  }), [cancelPanning, cancelZoom, windowId]);
 
-  useLayoutEffect(() => subscribeInterruption?.(cancelPanning), [cancelPanning, subscribeInterruption]);
+  useLayoutEffect(() => subscribeInterruption?.(() => { cancelPanning(); cancelZoom(); }), [cancelPanning, cancelZoom, subscribeInterruption]);
 
   const updateContentAlignment = useCallback(() => {
     const container = containerRef.current;
@@ -177,29 +187,47 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     setShouldCenterHorizontally(contentFrame.offsetWidth <= availableWidth + 2);
   }, []);
 
-  const applyZoomPivot = useCallback(() => {
-    if (!zoomPivot.current || !containerRef.current) {
-      return;
-    }
+  const paperBounds = useCallback((completed: boolean) => {
+    const frame = contentFrameRef.current;
+    // Only a completed current canvas is authoritative. React-PDF temporarily
+    // replaces it with a 300x150 canvas while the reserved paper already resized.
+    const canvas = completed ? frame?.querySelector('canvas')?.getBoundingClientRect() : null;
+    if (canvas?.width && canvas.height) return canvas;
+    const bounds = frame?.getBoundingClientRect();
+    if (!bounds || bounds.width <= 2 || bounds.height <= 2) return null;
+    return { left: bounds.left + 1, top: bounds.top + 1, width: bounds.width - 2, height: bounds.height - 2 };
+  }, []);
 
-    const { x, y, frameX, frameY, oldScale, centered } = zoomPivot.current;
+  const applyZoomPivot = useCallback((completed = false) => {
+    const pending = zoomPivot.current;
     const container = containerRef.current;
+    if (!pending || !container || pending.targetScale !== scale || requestedScale.current !== scale) return;
+    const paper = paperBounds(completed);
+    if (!paper) { if (completed) cancelZoom(); return; }
+    const { point, target, centered } = pending.anchor;
     const bounds = container.getBoundingClientRect();
-    const frame = contentFrameRef.current?.getBoundingClientRect();
-    if (!frame) return;
-    // Anchor the same point on the paper, including fit-width centering/padding.
-    const left = container.scrollLeft + frame.left - bounds.left + ((x - frameX) / oldScale) * scale - (centered ? container.clientWidth / 2 : x);
-    const top = container.scrollTop + frame.top - bounds.top + ((y - frameY) / oldScale) * scale - (centered ? container.clientHeight / 2 : y);
+    const left = container.scrollLeft + paper.left - bounds.left + point.x * paper.width - (centered ? container.clientWidth / 2 : target.x);
+    const top = container.scrollTop + paper.top - bounds.top + point.y * paper.height - (centered ? container.clientHeight / 2 : target.y);
     container.scrollLeft = left;
     container.scrollTop = top;
-    // Some engines truncate scroll writes. Choose the nearest pixel there so
-    // alternating zooms do not accumulate a directional bias; retain subpixels
-    // where supported, and leave genuine boundary clamps alone.
-    if (left >= 0 && left <= container.scrollWidth - container.clientWidth && Math.abs(container.scrollLeft - left) > 0.5) container.scrollLeft = Math.round(left);
-    if (top >= 0 && top <= container.scrollHeight - container.clientHeight && Math.abs(container.scrollTop - top) > 0.5) container.scrollTop = Math.round(top);
+    // Preserve subpixels where supported; choose the nearest pixel in engines
+    // that truncate writes. Genuine boundary clamps must remain clamps.
+    const maxLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+    const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    if (left >= 0 && left <= maxLeft && Math.abs(container.scrollLeft - left) > 0.5) container.scrollLeft = Math.round(left);
+    if (top >= 0 && top <= maxTop && Math.abs(container.scrollTop - top) > 0.5) container.scrollTop = Math.round(top);
     syncPanTargetToContainer();
-    zoomPivot.current = null;
-  }, [scale, syncPanTargetToContainer]);
+    if (completed) {
+      zoomPivot.current = null;
+      // Rebase only a genuinely clamped axis to its actual visible point. The
+      // other axis still retains its precise point across repeated zooms.
+      const actualPaper = paperBounds(true);
+      if (actualPaper) {
+        if (left < -0.000001 || left > maxLeft + 0.000001) pending.anchor.point.x = ((centered ? container.clientWidth / 2 : target.x) + bounds.left - actualPaper.left) / actualPaper.width;
+        if (top < -0.000001 || top > maxTop + 0.000001) pending.anchor.point.y = ((centered ? container.clientHeight / 2 : target.y) + bounds.top - actualPaper.top) / actualPaper.height;
+      }
+    }
+  }, [cancelZoom, paperBounds, scale, syncPanTargetToContainer]);
 
   useLayoutEffect(() => {
     updateContentAlignment();
@@ -226,9 +254,9 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     const changedTop = Math.abs(actual.top - baseline.top) > 0.01 && Math.abs(actual.top - clampTop) >= 1;
     if (!changedLeft && !changedTop) return;
     if (!ownPanFrame) cancelPanning();
-    zoomPivot.current = null;
+    cancelZoom();
     persistViewport({ scrollLeft: changedLeft ? actual.left : desired.left, scrollTop: changedTop ? actual.top : desired.top });
-  }, [cancelPanning, persistViewport]);
+  }, [cancelPanning, cancelZoom, persistViewport]);
 
   const restoreScroll = useCallback(() => {
     const container = containerRef.current;
@@ -245,17 +273,18 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     // layout clamp must not overwrite an explicitly restored page position.
     const container = containerRef.current;
     if (container) lastAppliedScroll.current = { left: container.scrollLeft, top: container.scrollTop };
-    zoomPivot.current = null;
+    cancelZoom();
     cancelPanAnimation();
-  }, [documentUrl, activePage, cancelPanAnimation]);
+  }, [documentUrl, activePage, pageWidth, cancelPanAnimation, cancelZoom]);
 
   useLayoutEffect(() => {
+    if (zoomPivot.current && zoomPivot.current.targetScale !== scale) cancelZoom();
     currentRenderToken.current = renderToken;
     renderGeneration.current += 1;
     if (zoomCorrectionFrame.current !== null) window.cancelAnimationFrame(zoomCorrectionFrame.current);
     zoomCorrectionFrame.current = null;
     renderReady.current = false;
-  }, [renderToken]);
+  }, [cancelZoom, renderToken, scale]);
 
   useLayoutEffect(() => {
     // Reserve the new paper's geometry before React-PDF replaces its canvas.
@@ -273,23 +302,23 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   }, [currentWindow?.viewport, restoreScroll]);
 
   const handleRenderSuccess = useCallback(() => {
-    if (renderToken !== currentRenderToken.current) return;
+    if (renderToken !== currentRenderToken.current || renderToken.scale !== requestedScale.current) return;
     const generation = renderGeneration.current;
     updateContentAlignment();
     if (zoomCorrectionFrame.current !== null) window.cancelAnimationFrame(zoomCorrectionFrame.current);
     zoomCorrectionFrame.current = window.requestAnimationFrame(() => {
       zoomCorrectionFrame.current = null;
-      if (generation !== renderGeneration.current || renderToken !== currentRenderToken.current) return;
+      if (generation !== renderGeneration.current || renderToken !== currentRenderToken.current || renderToken.scale !== requestedScale.current) return;
       captureScrollIntent();
       if (!containerRef.current?.clientWidth || !containerRef.current.clientHeight) {
         // A hidden mobile pane has no meaningful zoom geometry. Preserve its
         // desired offsets and let ResizeObserver restore them when shown again.
-        zoomPivot.current = null;
+        cancelZoom();
         renderReady.current = true;
         return;
       }
       const zooming = !!zoomPivot.current;
-      if (zooming) applyZoomPivot();
+      if (zooming) applyZoomPivot(true);
       else restoreScroll();
       renderReady.current = true;
       if (zooming && containerRef.current) {
@@ -297,7 +326,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
         persistViewport({ scrollLeft: containerRef.current.scrollLeft, scrollTop: containerRef.current.scrollTop });
       }
     });
-  }, [applyZoomPivot, captureScrollIntent, persistViewport, renderToken, restoreScroll, updateContentAlignment]);
+  }, [applyZoomPivot, cancelZoom, captureScrollIntent, persistViewport, renderToken, restoreScroll, updateContentAlignment]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -308,6 +337,10 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     }
 
     const observer = new ResizeObserver(() => {
+      const bounds = container.getBoundingClientRect();
+      const layout = zoomAnchor.current?.layout;
+      if (!container.clientWidth || !container.clientHeight || (layout &&
+        (layout.left !== bounds.left || layout.top !== bounds.top || layout.width !== bounds.width || layout.height !== bounds.height))) cancelZoom();
       updateContentAlignment();
       if (!zoomPivot.current) restoreScroll();
     });
@@ -316,7 +349,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     observer.observe(contentFrame);
 
     return () => observer.disconnect();
-  }, [applyZoomPivot, restoreScroll, updateContentAlignment]);
+  }, [cancelZoom, restoreScroll, updateContentAlignment]);
 
   const zoomAt = useCallback((factor: number, clientPoint?: { x: number; y: number }) => {
     const container = containerRef.current;
@@ -327,33 +360,36 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     captureScrollIntent();
     syncPanTargetToContainer();
     const bounds = container.getBoundingClientRect();
-    const frame = contentFrameRef.current?.getBoundingClientRect();
-    if (!frame?.width || !frame.height || !container.clientWidth || !container.clientHeight) {
-      updateScale(nextScale);
-      return;
+    const paper = paperBounds(renderReady.current);
+    if (!paper || !container.clientWidth || !container.clientHeight) {
+      cancelZoom(); updateScale(nextScale); return;
     }
-    const x = clientPoint ? clientPoint.x - bounds.left : container.clientWidth / 2;
-    const y = clientPoint ? clientPoint.y - bounds.top : container.clientHeight / 2;
-    // Several wheel events can arrive in the same task, before React commits.
-    // Keep the original paper anchor and accumulate the requested scale.
-    if (!zoomPivot.current) zoomPivot.current = {
-      x, y, frameX: (frame?.left ?? bounds.left) - bounds.left,
-      frameY: (frame?.top ?? bounds.top) - bounds.top, oldScale: scale, centered: !clientPoint,
+    const target = clientPoint ? { x: clientPoint.x - bounds.left, y: clientPoint.y - bounds.top }
+      : { x: container.clientWidth / 2, y: container.clientHeight / 2 };
+    const previous = zoomAnchor.current;
+    const centered = !clientPoint;
+    const sameLayout = previous && previous.layout.left === bounds.left && previous.layout.top === bounds.top && previous.layout.width === bounds.width && previous.layout.height === bounds.height;
+    const samePivot = previous && previous.centered === centered && (centered || (previous.target.x === target.x && previous.target.y === target.y));
+    const anchor: ZoomAnchor = sameLayout && samePivot ? previous : {
+      point: { x: (bounds.left + target.x - paper.left) / paper.width, y: (bounds.top + target.y - paper.top) / paper.height },
+      target, centered, layout: { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height },
     };
+    zoomAnchor.current = anchor;
+    zoomPivot.current = { anchor, targetScale: nextScale };
     updateScale(nextScale);
-  }, [cancelPanning, captureScrollIntent, scale, syncPanTargetToContainer, updateScale]);
+  }, [cancelPanning, cancelZoom, captureScrollIntent, paperBounds, syncPanTargetToContainer, updateScale]);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey && !event.metaKey) { cancelPanning(); return; }
+      if (!event.ctrlKey && !event.metaKey) { cancelPanning(); cancelZoom(); return; }
       event.preventDefault();
       zoomAt(event.deltaY > 0 ? 1 / 1.15 : 1.15, { x: event.clientX, y: event.clientY });
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [cancelPanning, zoomAt]);
+  }, [cancelPanning, cancelZoom, zoomAt]);
 
   const handlePageLoad = useCallback((page: PDFPageProxy) => {
     if (currentRenderToken.current.documentUrl !== documentUrl || currentRenderToken.current.activePage !== activePage || page.pageNumber !== activePage) return;
@@ -429,6 +465,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0 || mode !== 'grab' || !containerRef.current) return;
+    cancelZoom();
     containerRef.current.focus();
     e.preventDefault();
     captureScrollIntent();
@@ -476,9 +513,10 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
 
   const handleModeChange = useCallback((nextMode: InteractionMode) => {
     cancelPanning();
+    cancelZoom();
     setMode(nextMode);
     persistViewport({ mode: nextMode });
-  }, [cancelPanning, persistViewport]);
+  }, [cancelPanning, cancelZoom, persistViewport]);
 
   useEffect(() => () => {
     cancelPanAnimation();
@@ -513,19 +551,25 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     }
   }, [setActiveWindow, windowId]);
 
+  useLayoutEffect(() => {
+    if (quickFlipVisible || activeWindowId !== (windowId ?? 'main')) cancelZoom();
+  }, [activeWindowId, cancelZoom, quickFlipVisible, windowId]);
+
   useReaderGestures({
     containerRef, frameRef: contentFrameRef, scale, canSwipe: mode === 'grab', isActive: activeWindowId === (windowId ?? 'main'),
     contextKey: `${documentUrl}:${activePage}:${quickFlipVisible}:${scale}:${mode}`,
-    onActivate: handleViewportFocus,
+    onActivate: () => { cancelZoom(); handleViewportFocus(); },
+    getPaperBounds: () => paperBounds(renderReady.current),
     onTurn: direction => updateActivePage(activePage + direction),
-    onZoom: (nextScale, anchor, midpoint) => {
+    onZoom: (nextScale, point, midpoint) => {
       const bounds = containerRef.current?.getBoundingClientRect();
       if (!bounds) return;
       cancelPanAnimation();
       captureScrollIntent();
-      const x = midpoint.x - bounds.left;
-      const y = midpoint.y - bounds.top;
-      zoomPivot.current = { x, y, frameX: x - anchor.x * scale, frameY: y - anchor.y * scale, oldScale: scale };
+      const anchor: ZoomAnchor = { point, target: { x: midpoint.x - bounds.left, y: midpoint.y - bounds.top }, centered: false,
+        layout: { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height } };
+      zoomAnchor.current = anchor;
+      zoomPivot.current = { anchor, targetScale: Math.min(4, Math.max(0.1, nextScale)) };
       updateScale(nextScale);
     },
   });
@@ -587,7 +631,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
 
         <div className="flex items-center gap-2 text-sm text-stone-500">
           <button aria-label="缩小" title="缩小" disabled={scale <= 0.1} className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9] disabled:opacity-40" onClick={() => zoomAt(0.8)}><ZoomOut size={14} /></button>
-          <button aria-label="恢复适合宽度" title="恢复适合宽度" className="flex items-center gap-1 text-[0.75rem] text-stone-700" onClick={() => { cancelPanning(); zoomPivot.current = null; updateScale(1); persistViewport({ scale: 1, scrollLeft: 0, scrollTop: 0 }); if (containerRef.current) { containerRef.current.scrollLeft = 0; containerRef.current.scrollTop = 0; } syncPanTargetToContainer(); }}><RotateCcw size={12} />{Math.round(scale * 100)}%</button>
+          <button aria-label="恢复适合宽度" title="恢复适合宽度" className="flex items-center gap-1 text-[0.75rem] text-stone-700" onClick={() => { cancelPanning(); cancelZoom(); updateScale(1); persistViewport({ scale: 1, scrollLeft: 0, scrollTop: 0 }); if (containerRef.current) { containerRef.current.scrollLeft = 0; containerRef.current.scrollTop = 0; } syncPanTargetToContainer(); }}><RotateCcw size={12} />{Math.round(scale * 100)}%</button>
           <button aria-label="放大" title="放大" disabled={scale >= 4} className="border border-[var(--border)] px-2 py-1 text-stone-900 transition hover:bg-[#f0ede9] disabled:opacity-40" onClick={() => zoomAt(1.2)}><ZoomIn size={14} /></button>
         </div>
       </div>
