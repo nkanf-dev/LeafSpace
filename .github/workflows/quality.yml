@@ -16,7 +16,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps webkit
-      - run: npx playwright test storage-metadata.test.ts --project=webkit --workers=1 --grep 'during schema failure' --repeat-each=5 --retries=0
+      - run: npx playwright test storage-metadata.test.ts --project=webkit --workers=1 --grep 'during schema failure' --repeat-each=20 --retries=0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
