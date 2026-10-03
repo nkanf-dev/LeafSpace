@@ -45,7 +45,7 @@ async function isolateDecoders(page: Page, fallback: boolean, blockWasm: boolean
   });
   await page.addInitScript(({ fallback }) => {
     const NativeWorker = window.Worker;
-    const evidence = { customCreated: 0, customSuccess: 0, customErrors: 0, fallback };
+    const evidence = { customCreated: 0, customSuccess: 0, customErrors: 0, errors: [] as { type: string; error?: string; key?: string; pageNumber?: number }[], fallback };
     Object.assign(window, { leafspaceDecoderEvidence: evidence });
     window.Worker = class extends NativeWorker {
       constructor(url: string | URL, options?: WorkerOptions) {
@@ -56,7 +56,7 @@ async function isolateDecoders(page: Page, fallback: boolean, blockWasm: boolean
           evidence.customCreated++;
           this.addEventListener('message', event => {
             if (event.data?.type === 'success') evidence.customSuccess++;
-            if (event.data?.type === 'error' || event.data?.type === 'document-error') evidence.customErrors++;
+            if (event.data?.type === 'error' || event.data?.type === 'document-error') { evidence.customErrors++; evidence.errors.push({ type: event.data.type, error: event.data.error, key: event.data.key, pageNumber: event.data.pageNumber }); }
           });
         }
       }
@@ -95,6 +95,8 @@ for (const blockWasm of [false, true]) {
     await page.keyboard.press('n');
     const reference = page.getByRole('region', { name: '参考阅读区，第 1 页', exact: true });
     await expectDecoded(reference.locator('canvas'));
+    await info.attach('reader-decoder-requests-before-assert', { body: JSON.stringify(requests, null, 2), contentType: 'application/json' });
+    console.log('READER_DECODER_REQUESTS', info.project.name, blockWasm, JSON.stringify(requests));
     expect(requests.some(url => url.endsWith('/openjpeg.wasm'))).toBe(true);
     expect(requests.some(url => url.endsWith('/openjpeg_nowasm_fallback.js'))).toBe(blockWasm);
     expectLocalDecoderRequests(page, requests);
@@ -127,6 +129,8 @@ for (const fallback of [false, true]) for (const blockWasm of [false, true]) {
     const image = page.getByRole('complementary', { name: '夹页列表' }).getByRole('img', { name: '第 1 页缩略图', exact: true });
     await expectThumbnail(image);
     const evidence = await page.evaluate(() => (window as unknown as { leafspaceDecoderEvidence: { customCreated: number; customSuccess: number; customErrors: number } }).leafspaceDecoderEvidence);
+    await info.attach('thumbnail-decoder-before-assert', { body: JSON.stringify({ evidence, requests }, null, 2), contentType: 'application/json' });
+    console.log('THUMBNAIL_DECODER_EVIDENCE', info.project.name, fallback, blockWasm, JSON.stringify({ evidence, requests }));
     expect(evidence.customCreated).toBe(fallback ? 0 : 1);
     if (!fallback) { expect(evidence.customSuccess).toBeGreaterThan(0); expect(evidence.customErrors).toBe(0); }
     expect(requests.filter(url => url.endsWith('/openjpeg.wasm')).length).toBeGreaterThan(before);
