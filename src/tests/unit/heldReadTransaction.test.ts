@@ -4,7 +4,7 @@ import { bookStore } from '../../stores/bookStore';
 import { windowStore } from '../../stores/windowStore';
 import { heldStore } from '../../stores/heldStore';
 
-vi.mock('../../services/ThumbnailService', () => ({ thumbnailService: { ensureThumbnail: vi.fn().mockResolvedValue(undefined), getThumbnailKey: (page: number) => `test_${page}` } }));
+vi.mock('../../services/ThumbnailService', () => ({ thumbnailService: { activateDocument: vi.fn(), releaseDocument: vi.fn(), ensureThumbnail: vi.fn().mockResolvedValue(undefined), getThumbnailKey: (page: number) => `test_${page}` } }));
 const viewport = { mode: 'grab' as const, scale: 1.4, scrollLeft: 120, scrollTop: 320 };
 
 describe('prepared held-page reads', () => {

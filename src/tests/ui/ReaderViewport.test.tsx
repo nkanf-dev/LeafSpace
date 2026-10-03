@@ -21,7 +21,7 @@ vi.mock('react-pdf', () => ({
   },
 }));
 vi.mock('../../services/ThumbnailService', () => ({
-  thumbnailService: {
+  thumbnailService: { activateDocument: vi.fn(), releaseDocument: vi.fn(),
     ensureThumbnail: vi.fn().mockResolvedValue(undefined),
     getThumbnailKey: (page: number) => `test_${page}_240`,
   },

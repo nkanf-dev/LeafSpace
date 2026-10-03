@@ -77,6 +77,8 @@ test('five-page grid keeps every pane visible after repeated docking, floating a
   await expect(page.locator('[data-floating-window]')).toHaveCount(4);
   await page.getByRole('combobox', { name: '工作区布局' }).selectOption('grid');
   await expect(page.locator('[data-floating-window]')).toHaveCount(0);
+  await expect(reader(page).locator('canvas')).toBeVisible();
+  for (const number of [2, 4, 6, 8]) await expect(page.getByRole('region', { name: `参考阅读区，第 ${number} 页`, exact: true }).locator('canvas')).toBeVisible();
   await testInfo.attach('five-page-grid', { body: await page.screenshot(), contentType: 'image/png' });
   await page.getByRole('button', { name: '保存现场', exact: true }).click();
   await expect.poll(async () => (await snapshots(page))[0]?.windows.length).toBe(5);
