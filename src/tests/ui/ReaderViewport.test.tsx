@@ -7,13 +7,14 @@ import { useBookStore } from '../../stores/bookStore';
 import { heldStore } from '../../stores/heldStore';
 import { windowStore } from '../../stores/windowStore';
 
-const renderLifecycle = vi.hoisted(() => ({ callbacks: [] as (() => void)[], loads: [] as ((page: PDFPageProxy) => void)[] }));
+const renderLifecycle = vi.hoisted(() => ({ canvasRefs: [] as ((canvas: HTMLCanvasElement | null) => void)[], callbacks: [] as (() => void)[], loads: [] as ((page: PDFPageProxy) => void)[] }));
 
 // Exercise reader behavior against real stores without a canvas/PDF worker.
 vi.mock('react-pdf', () => ({
   pdfjs: { GlobalWorkerOptions: {}, version: 'test' },
   Document: ({ children }: ComponentProps<'div'>) => <div>{children}</div>,
-  Page: ({ pageNumber, scale, onRenderSuccess, onLoadSuccess }: { pageNumber: number; scale: number; onRenderSuccess: () => void; onLoadSuccess: (page: PDFPageProxy) => void }) => {
+  Page: ({ pageNumber, scale, onRenderSuccess, onLoadSuccess, canvasRef }: { pageNumber: number; scale: number; canvasRef: (canvas: HTMLCanvasElement | null) => void; onRenderSuccess: () => void; onLoadSuccess: (page: PDFPageProxy) => void }) => {
+    renderLifecycle.canvasRefs.push(canvasRef);
     renderLifecycle.callbacks.push(onRenderSuccess);
     renderLifecycle.loads.push(onLoadSuccess);
     return <div data-testid="pdf-page" data-page={pageNumber} data-scale={scale}><button onClick={onRenderSuccess}>Complete PDF render</button></div>;
@@ -55,6 +56,7 @@ function mockScrollGeometry(element: HTMLElement) {
 const resizeCallbacks: (() => void)[] = [];
 describe('ReaderViewport', () => {
   beforeEach(() => {
+    renderLifecycle.canvasRefs.length = 0;
     renderLifecycle.callbacks.length = 0;
     renderLifecycle.loads.length = 0;
     resizeCallbacks.length = 0;
@@ -74,6 +76,18 @@ describe('ReaderViewport', () => {
     render(<ReaderViewport isMain windowId="main" />);
     expect(screen.getByText('等待载入...')).toBeInTheDocument();
     expect(screen.queryByTestId('pdf-page')).not.toBeInTheDocument();
+  });
+
+  it('initializes PDF canvas context hints before drawing and keeps the ref stable during zoom', () => {
+    loadDocument();
+    render(<ReaderViewport isMain windowId="main" />);
+    const initialize = renderLifecycle.canvasRefs.at(-1)!;
+    const getContext = vi.fn();
+    initialize({ getContext } as unknown as HTMLCanvasElement);
+    expect(getContext).toHaveBeenCalledExactlyOnceWith('2d', { alpha: false, willReadFrequently: true });
+    expect(() => initialize(null)).not.toThrow();
+    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    expect(renderLifecycle.canvasRefs.at(-1)).toBe(initialize);
   });
 
   it('uses bookStore as the source of the main page and scale', () => {

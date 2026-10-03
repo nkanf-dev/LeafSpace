@@ -199,7 +199,7 @@ async function fixturePixels(page: Page) {
     const context = canvas.getContext('2d')!;
     const pixel = (x: number, y: number) => Array.from(context.getImageData(
       Math.floor(canvas.width * x / 420), Math.floor(canvas.height * y / 594), 1, 1).data);
-    return { width: canvas.width, height: canvas.height, visibility: getComputedStyle(canvas).visibility,
+    return { attributes: context.getContextAttributes?.(), width: canvas.width, height: canvas.height, visibility: getComputedStyle(canvas).visibility,
       background: pixel(10, 10), rectangle: pixel(80, 394), transform: Array.from(context.getTransform().toFloat64Array()) };
   });
 }
@@ -214,6 +214,7 @@ for (const failure of ['schema', 'metadata'] as const) {
     await page.getByRole('button', { name: '保存现场', exact: true }).click();
     await expect(page.getByRole('alert')).toBeVisible();
     expect((await probe(page)).assetWrites).toBe(0);
+    await info.attach(`${failure}-before-readback-screen`, { body: await page.screenshot(), contentType: 'image/png' });
     await expect(reader(page).locator('canvas')).toBeVisible();
     const initialPixels = await fixturePixels(page);
     await info.attach(`${failure}-initial-decoded-pixels`, { body: JSON.stringify(initialPixels), contentType: 'application/json' });
@@ -227,6 +228,16 @@ for (const failure of ['schema', 'metadata'] as const) {
     expect(settledPixels.background).toEqual([240, 237, 224, 255]);
     expect(settledPixels.rectangle).toEqual([51, 128, 76, 255]);
     await info.attach(`${failure}-failure-readable`, { body: await page.screenshot(), contentType: 'image/png' });
+    await page.getByRole('button', { name: '选择文字', exact: true }).click();
+    const text = reader(page).locator('.textLayer span').filter({ hasText: /^LeafSpace test book$/ }).first();
+    await expect(text).toBeVisible();
+    const bounds = (await text.boundingBox())!;
+    await page.mouse.move(bounds.x + 1, bounds.y + bounds.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(bounds.x + bounds.width - 1, bounds.y + bounds.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toContain('test book');
+
     await page.evaluate(() => { (window as unknown as { leafspaceMetadataProbe: { enabled: boolean } }).leafspaceMetadataProbe.enabled = false; });
     await page.getByRole('button', { name: '重试保存', exact: true }).click();
     await expect(page.getByRole('alert')).toHaveCount(0);

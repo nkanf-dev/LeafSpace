@@ -24,6 +24,11 @@ interface Props {
 type InteractionMode = 'grab' | 'pointer';
 
 export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, windowId }) => {
+  // PDF.js defaults to enableHWA:false and requests this context hint. Context
+  // attributes are fixed by the first getContext call, before the drawing effect.
+  const initializeCanvas = useCallback((canvas: HTMLCanvasElement | null) => {
+    canvas?.getContext('2d', { alpha: false, willReadFrequently: true });
+  }, []);
   const documentUrl = useBookStore(state => state.documentUrl);
   const globalCurrentPage = useBookStore(state => state.currentPage);
   const globalScale = useBookStore(state => state.scale);
@@ -521,6 +526,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
                 loading={<div role="status" className="mt-24 text-sm italic text-stone-500" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>正在渲染...</div>}
               >
                 <Page
+                  canvasRef={initializeCanvas}
                   pageNumber={activePage}
                   width={pageWidth}
                   scale={scale}
