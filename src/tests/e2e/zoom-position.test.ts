@@ -19,7 +19,7 @@ async function expectPoint(region: Locator, before: {x: number; y: number}, x = 
 }
 async function zoom(region: Locator, name: '放大' | '缩小') {
   const before = await paperPoint(region);
-  await region.locator('..').getByRole('button', { name, exact: true }).click();
+  await region.locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name, exact: true }).click();
   await expect.poll(async () => Math.abs((await paperPoint(region)).width - before.width * (name === '放大' ? 1.2 : 0.8))).toBeLessThan(2);
   await expect(region.locator('canvas')).toBeVisible();
 }
@@ -69,7 +69,7 @@ test('zoom anchors remain stable across fit-to-overflow transitions at narrow an
   const region = reader(page);
   for (const size of [{ width: 390, height: 844 }, { width: 1100, height: 780 }]) {
     await page.setViewportSize(size);
-    await region.locator('..').getByRole('button', { name: '恢复适合宽度', exact: true }).click();
+    await region.locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '恢复适合宽度', exact: true }).click();
     await expect(region.locator('canvas')).toBeVisible();
     await expect.poll(() => region.evaluate(element => Math.abs(element.querySelector('canvas')!.getBoundingClientRect().width - Math.min(612, element.clientWidth - (innerWidth < 640 ? 32 : 80) - 2)))).toBeLessThan(1);
     const before = await paperPoint(region);

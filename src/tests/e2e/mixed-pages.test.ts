@@ -105,7 +105,7 @@ test('mixed raster pages retain their effective rotation, crop ratio and fit-wid
   test.setTimeout(90_000); await page.goto('/'); await importBook(page, fixture);
   const evidence = [];
   for (const number of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1]) {
-    await goTo(page, number); await reader(page).locator('..').getByRole('button', { name: '恢复适合宽度', exact: true }).click();
+    await goTo(page, number); await reader(page).locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '恢复适合宽度', exact: true }).click();
     await expect.poll(() => reader(page).evaluate(element => element.scrollWidth - element.clientWidth)).toBe(0);
     if ([2, 7, 9, 10].includes(number)) await info.attach(`mixed-page-${number}`, { body: await page.screenshot(), contentType: 'image/png' });
     const dimensions = await decoded(reader(page), number);
@@ -113,11 +113,11 @@ test('mixed raster pages retain their effective rotation, crop ratio and fit-wid
     if (number === 2) {
       const anchor = await paperPoint(reader(page)), baseWidth = dimensions.frameWidth - 2;
       for (let step = 1; step <= 5; step++) {
-        await reader(page).locator('..').getByRole('button', { name: '放大', exact: true }).click();
+        await reader(page).locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '放大', exact: true }).click();
         await expect.poll(() => reader(page).locator('canvas').evaluate((canvas, width) => Math.abs(canvas.getBoundingClientRect().width - width), Math.floor(baseWidth * 1.2 ** step))).toBeLessThanOrEqual(1);
         await decoded(reader(page), number); await expectAnchor(reader(page), anchor);
       }
-      await reader(page).locator('..').getByRole('button', { name: '恢复适合宽度', exact: true }).click();
+      await reader(page).locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '恢复适合宽度', exact: true }).click();
       await decoded(reader(page), number);
     }
     await expect.poll(() => reader(page).evaluate(element => element.scrollWidth - element.clientWidth)).toBe(0);
@@ -142,14 +142,14 @@ test('cropped rotated thumbnails and a zoomed reference survive reopening withou
   const referenceFitWidth = (await decoded(reference, 7)).frameWidth - 2;
   const id = await reference.locator('xpath=ancestor::*[@data-window-id][1]').getAttribute('data-window-id');
   for (let index = 0; index < 5; index++) {
-    await reference.locator('..').getByRole('button', { name: '放大', exact: true }).click();
+    await reference.locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '放大', exact: true }).click();
     await expect.poll(() => reference.locator('canvas').evaluate((canvas, width) => Math.abs(canvas.getBoundingClientRect().width - width), Math.floor(referenceFitWidth * 1.2 ** (index + 1)))).toBeLessThanOrEqual(1);
     await decoded(reference, 7);
   }
   await reference.evaluate(element => element.scrollTo(90, 90));
   await expect.poll(() => reference.evaluate(element => [element.scrollLeft, element.scrollTop])).toEqual([90, 90]);
   const anchor = await paperPoint(reference);
-  await reference.locator('..').getByRole('button', { name: '放大', exact: true }).click();
+  await reference.locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '放大', exact: true }).click();
   await expect.poll(() => reference.locator('canvas').evaluate((canvas, width) => Math.abs(canvas.getBoundingClientRect().width - width), Math.floor(referenceFitWidth * 1.2 ** 6))).toBeLessThanOrEqual(1);
   await decoded(reference, 7);
   await expect.poll(async () => { const after = await paperPoint(reference); return Math.max(Math.abs(after.x - anchor.x) * after.width, Math.abs(after.y - anchor.y) * after.height); }).toBeLessThanOrEqual(2);
@@ -172,7 +172,7 @@ test('a tall raster page remains decoded at maximum zoom and returns to fit', as
   const fitWidth = (await decoded(reader(page), 9)).frameWidth - 2;
   const anchor = await paperPoint(reader(page));
   for (let index = 0; index < 8; index++) {
-    await reader(page).locator('..').getByRole('button', { name: '放大', exact: true }).click();
+    await reader(page).locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '放大', exact: true }).click();
     await expect.poll(() => reader(page).locator('canvas').evaluate((canvas, width) => Math.abs(canvas.getBoundingClientRect().width - width), Math.floor(fitWidth * Math.min(4, 1.2 ** (index + 1))))).toBeLessThanOrEqual(1);
     if (index < 7) {
       await decoded(reader(page), 9);
@@ -180,7 +180,7 @@ test('a tall raster page remains decoded at maximum zoom and returns to fit', as
       await info.attach(`tall-anchor-step-${index + 1}`, { body: JSON.stringify({ origin: anchor, current: await paperPoint(reader(page)) }, null, 2), contentType: 'application/json' });
     }
   }
-  await expect(reader(page).locator('..').getByRole('button', { name: '放大', exact: true })).toBeDisabled();
+  await expect(reader(page).locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '放大', exact: true })).toBeDisabled();
   await expect.poll(() => reader(page).locator('canvas').evaluate((canvas, width) => Math.abs(canvas.getBoundingClientRect().width - width * 4), fitWidth)).toBeLessThanOrEqual(1);
   await expect(reader(page).locator('canvas')).toBeVisible();
   const point = await reader(page).evaluate(element => {
@@ -202,7 +202,7 @@ test('a tall raster page remains decoded at maximum zoom and returns to fit', as
   expect(screenColor).toEqual(canvasColor);
   const evidence = await decoded(reader(page), 9); await expectAnchor(reader(page), anchor);
   await info.attach('tall-page-canvas-dimensions', { body: JSON.stringify(evidence, null, 2), contentType: 'application/json' });
-  await reader(page).locator('..').getByRole('button', { name: '恢复适合宽度', exact: true }).click(); await decoded(reader(page), 9);
+  await reader(page).locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '恢复适合宽度', exact: true }).click(); await decoded(reader(page), 9);
   await expect.poll(() => reader(page).evaluate(element => element.scrollWidth - element.clientWidth)).toBe(0);
   await goTo(page, 1); await decoded(reader(page), 1);
 });
@@ -212,7 +212,7 @@ test('one zoom after scrolling deep into a tall page preserves its actual displa
   test.setTimeout(90_000); await page.goto('/'); await importBook(page, fixture); await goTo(page, 9);
   const baseWidth = (await decoded(reader(page), 9)).frameWidth - 2;
   for (let step = 1; step <= 4; step++) {
-    await reader(page).locator('..').getByRole('button', { name: '放大', exact: true }).click();
+    await reader(page).locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '放大', exact: true }).click();
     await expect.poll(() => reader(page).locator('canvas').evaluate((canvas, width) => Math.abs(canvas.getBoundingClientRect().width - width), Math.floor(baseWidth * 1.2 ** step))).toBeLessThanOrEqual(1);
     await decoded(reader(page), 9);
   }
@@ -223,7 +223,7 @@ test('one zoom after scrolling deep into a tall page preserves its actual displa
   await expect.poll(async () => Math.abs((await paperPoint(reader(page))).y - .85)).toBeLessThan(.001);
   const anchor = await paperPoint(reader(page));
   expect(await reader(page).evaluate(element => element.scrollTop > 0 && element.scrollTop < element.scrollHeight - element.clientHeight - 10)).toBe(true);
-  await reader(page).locator('..').getByRole('button', { name: '放大', exact: true }).click();
+  await reader(page).locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '放大', exact: true }).click();
   await expect.poll(() => reader(page).locator('canvas').evaluate((canvas, width) => Math.abs(canvas.getBoundingClientRect().width - width), Math.floor(baseWidth * 1.2 ** 5))).toBeLessThanOrEqual(1);
   await decoded(reader(page), 9);
   await expectAnchor(reader(page), anchor);
