@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, importBook } from './helpers';
 
 test('serves and decodes the LeafSpace tab and home-screen icons', async ({ page, request }, testInfo) => {
   await page.goto('/');
@@ -41,4 +41,16 @@ test('serves and decodes the LeafSpace tab and home-screen icons', async ({ page
   </main>`);
   await page.locator('img').evaluateAll(images => Promise.all(images.map(image => (image as HTMLImageElement).decode())));
   await testInfo.attach('leafspace-site-icons', { body: await page.screenshot(), contentType: 'image/png' });
+});
+
+
+test('declares the Chinese interface language in both library and reader', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-Hans');
+  await expect(page.getByRole('heading', { name: '页境阅读' })).toBeVisible();
+  await importBook(page);
+  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-Hans');
+  await page.getByRole('button', { name: '回到书库', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '页境阅读' })).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-Hans');
 });
