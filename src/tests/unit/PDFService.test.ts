@@ -7,6 +7,7 @@ const { destroyLoadingTaskMock, getDocumentMock } = vi.hoisted(() => ({
 
 vi.mock('pdfjs-dist', () => ({
   GlobalWorkerOptions: { workerSrc: '' },
+  PasswordResponses: { NEED_PASSWORD: 1, INCORRECT_PASSWORD: 2 },
   getDocument: getDocumentMock,
 }));
 
@@ -60,6 +61,34 @@ describe('PDFService', () => {
     await expect(service.loadDocument('https://example.com/sample.pdf')).rejects.toThrow('Invalid PDF payload');
     expectNoDocument(service);
     expect(destroyLoadingTaskMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([1, 2])('normalizes parser password response %s without retaining document state', async code => {
+    const passwordError = Object.assign(new Error('Private parser detail'), { name: 'PasswordException', code });
+    getDocumentMock.mockReturnValue({ destroy: destroyLoadingTaskMock, get promise() { return Promise.reject(passwordError); } });
+    const service = new PDFService();
+    await expect(service.loadDocument('https://example.com/locked.pdf')).rejects.toMatchObject({ name: 'PDFPasswordRequiredError', message: expect.stringContaining('无需打开密码') });
+    expectNoDocument(service);
+    expect(destroyLoadingTaskMock).toHaveBeenCalledOnce();
+    getDocumentMock.mockReturnValue(loadedTask());
+    await expect(service.loadDocument('https://example.com/unlocked.pdf')).resolves.toMatchObject({ numPages: 12 });
+  });
+
+  it.each([
+    new Error('PasswordException: text alone is not a typed parser response'),
+    Object.assign(new Error('Malformed parser response'), { name: 'PasswordException', code: 99 }),
+    Object.assign(new Error('Invalid PDF'), { name: 'InvalidPDFException', code: 1 }),
+    new DOMException('Cancelled', 'AbortError'),
+  ])('preserves non-password parser failures unchanged: %s', async error => {
+    getDocumentMock.mockReturnValue({ destroy: destroyLoadingTaskMock, get promise() { return Promise.reject(error); } });
+    await expect(new PDFService().loadDocument('https://example.com/broken.pdf')).rejects.toBe(error);
+  });
+
+  it('does not classify source-reading failures as parser password requirements', async () => {
+    const error = Object.assign(new Error('Source read failed'), { name: 'PasswordException', code: 1 });
+    vi.mocked(fetch).mockRejectedValueOnce(error);
+    await expect(new PDFService().loadDocument('https://example.com/source.pdf')).rejects.toBe(error);
+    expect(getDocumentMock).not.toHaveBeenCalled();
   });
 
   it('stores metadata and a separate thumbnail byte source after a successful load', async () => {
