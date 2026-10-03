@@ -18,10 +18,16 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [isResizingSplit, setIsResizingSplit] = useState(false);
+  const interactionActive = useRef(false);
+  const stopInteraction = useCallback(() => {
+    interactionActive.current = false;
+    setDraggingId(null); setResizingId(null); setIsResizingSplit(false);
+    document.body.classList.remove('is-panning');
+  }, []);
 
   const dragOffset = useRef({ x: 0, y: 0 });
   const resizeStart = useRef({ x: 0, y: 0, w: 0, h: 0 });
-  const splitResizeStart = useRef({ x: 0, ratio: 0.64 });
+  const splitResizeStart = useRef({ x: 0, ratio: 0.64, windowId: '' });
   const windowsRef = useRef(windows);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const swapWithMain = useWindowStore(state => state.swapWithMain);
@@ -48,8 +54,9 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
   const splitRatio = clamp(dockedWindow?.splitRatio ?? 0.64, 0.35, 0.8);
 
   const handleMouseDown = (e: React.MouseEvent, win: ReaderWindow) => {
-    if (win.type === 'main' || win.dockMode !== 'none' || (e.target instanceof Element && e.target.closest('button'))) return;
+    if (e.button !== 0 || win.type === 'main' || win.dockMode !== 'none' || (e.target instanceof Element && e.target.closest('button'))) return;
     e.preventDefault();
+    interactionActive.current = true;
     setDraggingId(win.id);
     const windowEl = e.currentTarget.closest('[data-floating-window]') as HTMLElement;
     const windowRect = windowEl.getBoundingClientRect();
@@ -58,20 +65,29 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
   };
 
   const handleResizeStart = (e: React.MouseEvent, win: ReaderWindow) => {
+    if (e.button !== 0) return;
     e.preventDefault(); e.stopPropagation();
+    interactionActive.current = true;
     setResizingId(win.id);
     resizeStart.current = { x: e.clientX, y: e.clientY, w: win.width || 400, h: win.height || 500 };
   };
 
   const handleSplitResizeStart = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
+    interactionActive.current = true;
     setIsResizingSplit(true);
-    splitResizeStart.current = { x: e.clientX, ratio: splitRatio };
+    splitResizeStart.current = { x: e.clientX, ratio: splitRatio, windowId: dockedWindow?.id ?? '' };
   };
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
+    if (!interactionActive.current) return;
+    if (!(e.buttons & 1) || workspaceRef.current?.closest('[inert]')) { stopInteraction(); return; }
+    const targetId = draggingId ?? resizingId;
+    if ((targetId && !windowsRef.current.some(window => window.id === targetId && window.dockMode === 'none'))
+      || (isResizingSplit && (!dockedWindow || dockedWindow.id !== splitResizeStart.current.windowId || useGrid))) { stopInteraction(); return; }
     if (!workspaceRef.current) return;
     const workspaceRect = workspaceRef.current.getBoundingClientRect();
 
@@ -119,18 +135,31 @@ export const WorkspaceCanvas: React.FC<Props> = ({ windows, onWindowUpdate, onWi
     }
     };
 
-    const up = () => { setDraggingId(null); setResizingId(null); setIsResizingSplit(false); };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') stopInteraction(); };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!interactionActive.current || (event.key !== 'Escape' && event.key !== ' ')) return;
+      stopInteraction();
+      // Escape cancels the pointer operation before the global window-close action.
+      // Space may continue to open Quick Flip after ending the pointer operation.
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); }
+    };
     if (draggingId || resizingId || isResizingSplit) {
       window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', up);
+      window.addEventListener('mouseup', stopInteraction);
+      window.addEventListener('blur', stopInteraction);
+      window.addEventListener('keydown', onKeyDown, true);
+      document.addEventListener('visibilitychange', onVisibility);
       document.body.classList.add('is-panning');
     }
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', up);
+      window.removeEventListener('mouseup', stopInteraction);
+      window.removeEventListener('blur', stopInteraction);
+      window.removeEventListener('keydown', onKeyDown, true);
+      document.removeEventListener('visibilitychange', onVisibility);
       document.body.classList.remove('is-panning');
     };
-  }, [dockedWindow, draggingId, resizingId, isResizingSplit, onWindowUpdate]);
+  }, [dockedWindow, draggingId, resizingId, isResizingSplit, useGrid, onWindowUpdate, stopInteraction]);
 
   return (
     <div className="workspace-canvas relative flex h-full w-full flex-col overflow-hidden bg-[#edece9]" ref={workspaceRef}>

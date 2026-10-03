@@ -1,4 +1,4 @@
-import type { ComponentProps } from 'react';
+import { useState, type ComponentProps } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -91,5 +91,36 @@ describe('HeldPagesPanel', () => {
     await user.click(screen.getByRole('button', { name: '卡片视图' }));
     expect(screen.getByRole('button', { name: '卡片视图' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('img', { name: '第 8 页缩略图' })).toBeInTheDocument();
+  });
+
+  it.each(['click', 'escape'])('restores the remove opener when cancelling by %s', async method => {
+    const callbacks = props({ pages: [{ ...heldPage, isOpen: true, linkedWindowIds: ['reference'] }] });
+    render(<HeldPagesPanel {...callbacks} />);
+    const user = userEvent.setup();
+    const remove = screen.getByRole('button', { name: '移除第 8 页夹页' });
+    await user.click(remove);
+    if (method === 'click') await user.click(screen.getByRole('button', { name: '取消' }));
+    else await user.keyboard('{Escape}');
+    await waitFor(() => expect(remove).toHaveFocus());
+    expect(callbacks.onRemovePage).not.toHaveBeenCalled();
+  });
+
+  it('keeps covered controls inert and moves focus to the next page or empty heading after removal', async () => {
+    function InteractivePanel() {
+      const [pages, setPages] = useState([
+        { ...heldPage, isOpen: true, linkedWindowIds: ['reference'] },
+        { ...heldPage, id: 'held-9', pageNumber: 9 },
+      ]);
+      return <HeldPagesPanel {...props()} pages={pages} onRemovePage={id => setPages(current => current.filter(page => page.id !== id))} />;
+    }
+    render(<InteractivePanel />);
+    const user = userEvent.setup();
+    const remove = screen.getByRole('button', { name: '移除第 8 页夹页' });
+    await user.click(remove);
+    expect(remove.closest('[inert]')).not.toBeNull();
+    await user.click(screen.getByRole('button', { name: '保留窗口' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '阅读第 9 页' })).toHaveFocus());
+    await user.click(screen.getByRole('button', { name: '移除第 9 页夹页' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: '夹住的页面 (0)' })).toHaveFocus());
   });
 });
