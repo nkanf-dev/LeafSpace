@@ -1,4 +1,4 @@
-import { test, expect, importBook, reader, snapshots, expectMainPage, holdCurrentPage, quickFlip } from './helpers';
+import { test, expect, importBook, reader, snapshots, expectMainPage, quickFlip } from './helpers';
 import type { Page } from '@playwright/test';
 
 async function installCounter(page: Page) {
@@ -68,7 +68,9 @@ test('repeated no-op clicks do not restart the genuine page-change debounce', as
 test('real reference activation and Enter still save while cancelled preview focus does not', async ({ page }, info) => {
   test.skip(['mobile', 'mobile-webkit'].includes(info.project.name), 'Concurrent-pane focus here; compact tab switching remains covered by responsive tests');
   await installCounter(page); await page.clock.install(); await page.goto('/'); await importBook(page);
-  await holdCurrentPage(page, 1); await page.getByRole('button', { name: '打开第 1 页参考窗口', exact: true }).click();
+  await page.getByRole('button', { name: '夹住此页', exact: true }).click();
+  if (page.viewportSize()!.width < 1024) await page.getByRole('button', { name: '夹页 1', exact: true }).click();
+  await page.getByRole('button', { name: '打开第 1 页参考窗口', exact: true }).click();
   const reference = page.getByRole('region', { name: '参考阅读区，第 1 页', exact: true });
   await expect(reference.locator('canvas')).toBeVisible();
   const referenceId = await reference.locator('xpath=ancestor::*[@data-window-id][1]').getAttribute('data-window-id');

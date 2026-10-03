@@ -65,6 +65,8 @@ describe('reader activation persistence', () => {
       expect(region).toHaveFocus(); expect(windowStore.getState()).toBe(before);
       expect(notify).not.toHaveBeenCalled(); expect(save).toHaveBeenCalledTimes(1);
       expect(written).toHaveLength(1); expect(hasUnsavedWorkspace()).toBe(false);
+      await act(async () => { hidden = true; document.dispatchEvent(new Event('visibilitychange')); });
+      await tick(500); expect(save).toHaveBeenCalledTimes(1);
     } finally { unsubscribe(); }
   });
 
