@@ -136,3 +136,36 @@ for (const size of [{ width: 320, height: 568 }, { width: 740, height: 320 }]) {
     await expectMainPage(page, 1); await expect(reader(page)).toBeFocused();
   });
 }
+
+test('Quick Flip remains calm and actionable when backdrop filters are unavailable', async ({ page }, info) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/'); await importBook(page); await navigateTo(page, 4);
+  await page.getByRole('button', { name: '夹住此页', exact: true }).click();
+  await navigateTo(page, 3); await openQuickFlip(page);
+  const overlay = quickFlip(page);
+  const backdrop = overlay.locator(':scope > div').first();
+  await expect(backdrop).toHaveCSS('background-color', 'rgba(251, 250, 248, 0.92)');
+  await expect(backdrop).toHaveCSS('backdrop-filter', 'blur(40px)');
+  const selected = overlay.getByRole('button', { name: '选择第 3 页', exact: true });
+  for (const number of [2, 3, 4]) {
+    const thumbnail = overlay.getByRole('img', { name: `第 ${number} 页缩略图`, exact: true });
+    await expect(thumbnail).toBeVisible();
+    await expect.poll(() => thumbnail.evaluate(element => (element as HTMLImageElement).complete && (element as HTMLImageElement).naturalWidth > 0)).toBe(true);
+  }
+  await info.attach('quick-flip-paper-backdrop', { body: await page.screenshot(), contentType: 'image/png' });
+  // Deliberately remove the enhancement, without changing the production color.
+  await page.addStyleTag({ content: '[aria-label="速翻视图"] > div:first-child { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }' });
+  await expect(backdrop).toHaveCSS('backdrop-filter', 'none');
+  await expect(backdrop).toHaveCSS('background-color', 'rgba(251, 250, 248, 0.92)');
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await info.attach('quick-flip-without-filters', { body: await page.screenshot(), contentType: 'image/png' });
+  const scroll = await page.locator('.quick-flip-strip').evaluate(element => element.scrollLeft);
+  const dialog = await actions(page, selected, 3);
+  await expect(dialog.getByRole('button', { name: '阅读此页', exact: true })).toBeEnabled();
+  await info.attach('quick-flip-without-filters-actions', { body: await page.screenshot(), contentType: 'image/png' });
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0); await expect(selected).toBeFocused();
+  await expect(selected).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.locator('.quick-flip-strip').evaluate(element => element.scrollLeft)).toBe(scroll);
+  await page.keyboard.press('Escape'); await expectMainPage(page, 3); await expect(reader(page)).toBeFocused();
+});
