@@ -65,8 +65,12 @@ test('explicitly accepting the native warning permits leaving the synthetic unsa
   await requestReload(page, 'accept');
   await page.clock.resume();
   await expect(page.getByRole('heading', { name: '页境阅读', exact: true })).toBeVisible();
+  // Leaving may start a hidden-time save. Assert recovery of what actually became
+  // durable, rather than requiring an unsaved change to be lost.
+  const durablePage = (await snapshots(page))[0].currentPage;
+  expect([1, 2]).toContain(durablePage);
   await page.getByRole('button', { name: /leafspace-12-pages\.pdf/ }).click();
-  await expectMainPage(page, 1);
+  await expectMainPage(page, durablePage);
 });
 
 test('dismissing a PDF quota alert does not dismiss the native exit warning', async ({ page }, info) => {

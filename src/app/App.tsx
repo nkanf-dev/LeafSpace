@@ -30,7 +30,7 @@ const outlineButton = 'inline-flex min-h-10 items-center justify-center gap-2 bo
 
 function App() {
   const book = useBookStore();
-  const { currentPage, totalPages, documentId, documentName, scale, status: bookStatus, loadDocument } = book;
+  const { currentPage, totalPages, documentId, documentName, sessionId, scale, status: bookStatus, loadDocument } = book;
   const { pages: heldPages, holdPage, unholdPage, reset: resetHeldPages } = useHeldStore();
   const { windows, activeWindowId, navigateActive, setLayout, notice: windowNotice, clearNotice: clearWindowNotice, updateWindow, closeWindow, openInNewWindow, setActiveWindow, reset: resetWindows } = useWindowStore();
   const { isOpen: isQuickFlipVisible, close: closeQuickFlip, open: openQuickFlip } = useQuickFlipStore();
@@ -134,8 +134,22 @@ function App() {
 
   useUnsavedExitGuard();
 
-  useWorkspaceAutoSave({ documentId, currentPage, scale, heldPages, windows, activeWindowId,
-    enabled: ready && workspaceStatus === 'idle', saveWorkspace });
+  const readAutoSaveState = useCallback(() => {
+    const currentBook = useBookStore.getState();
+    const currentWorkspace = useWorkspaceStore.getState();
+    const currentWindows = useWindowStore.getState();
+    return {
+      documentId: currentBook.documentId, sessionId: currentBook.sessionId,
+      currentPage: currentBook.currentPage, scale: currentBook.scale,
+      heldPages: useHeldStore.getState().pages, windows: currentWindows.windows,
+      activeWindowId: currentWindows.activeWindowId,
+      enabled: !importLock.current && currentBook.status === 'ready' && currentWorkspace.status === 'idle'
+        && currentWorkspace.unrestoredDocumentId !== currentBook.documentId,
+    };
+  }, []);
+  useWorkspaceAutoSave({ documentId, sessionId, currentPage, scale, heldPages, windows, activeWindowId,
+    enabled: ready && workspaceStatus === 'idle' && workspace.unrestoredDocumentId !== documentId,
+    currentSnapshot: workspace.currentSnapshot, readCurrent: readAutoSaveState, saveWorkspace });
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
