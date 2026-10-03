@@ -1,7 +1,7 @@
-name: Targeted canvas diagnosis
+name: Canvas initialization control
 on:
   push:
-    branches: ['dev/diag-storage-canvas']
+    branches: ['dev/diag-canvas-control']
 permissions:
   contents: read
 jobs:

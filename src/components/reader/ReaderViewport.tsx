@@ -27,7 +27,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   // PDF.js defaults to enableHWA:false and requests this context hint. Context
   // attributes are fixed by the first getContext call, before the drawing effect.
   const initializeCanvas = useCallback((canvas: HTMLCanvasElement | null) => {
-    canvas?.getContext('2d', { alpha: false, willReadFrequently: true });
+    canvas?.getContext('2d', { alpha: false });
   }, []);
   const documentUrl = useBookStore(state => state.documentUrl);
   const globalCurrentPage = useBookStore(state => state.currentPage);
