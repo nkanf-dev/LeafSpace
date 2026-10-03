@@ -64,6 +64,15 @@ async function isolateDecoders(page: Page, fallback: boolean, blockWasm: boolean
   }, { fallback });
   return requests;
 }
+async function decoderResourceEvidence(page: Page, requests: string[]) {
+  const workers = await Promise.all(page.workers().map(async worker => {
+    try { return { url: worker.url(), resources: await worker.evaluate(() => performance.getEntriesByType('resource').map(entry => entry.name).filter(url => url.includes('/wasm/'))) }; }
+    catch (error) { return { url: worker.url(), resources: [] as string[], retired: String(error) }; }
+  }));
+  // Firefox can omit dynamic worker imports from network events. Resource timing
+  // remains browser evidence for the same required decoder and mounted prefix.
+  return { requests, workers, observed: [...requests, ...workers.flatMap(worker => worker.resources)] };
+}
 function expectLocalDecoderRequests(page: Page, requests: string[]) {
   const directory = new URL(`pdfjs/${version}/wasm/`, page.url()).href;
   expect(requests.length).toBeGreaterThan(0);
@@ -95,11 +104,12 @@ for (const blockWasm of [false, true]) {
     await page.keyboard.press('n');
     const reference = page.getByRole('region', { name: '参考阅读区，第 1 页', exact: true });
     await expectDecoded(reference.locator('canvas'));
-    await info.attach('reader-decoder-requests-before-assert', { body: JSON.stringify(requests, null, 2), contentType: 'application/json' });
-    console.log('READER_DECODER_REQUESTS', info.project.name, blockWasm, JSON.stringify(requests));
+    const resources = await decoderResourceEvidence(page, requests);
+    await info.attach('reader-decoder-requests-before-assert', { body: JSON.stringify(resources, null, 2), contentType: 'application/json' });
+    console.log('READER_DECODER_REQUESTS', info.project.name, blockWasm, JSON.stringify(resources));
     expect(requests.some(url => url.endsWith('/openjpeg.wasm'))).toBe(true);
-    expect(requests.some(url => url.endsWith('/openjpeg_nowasm_fallback.js'))).toBe(blockWasm);
-    expectLocalDecoderRequests(page, requests);
+    expect(resources.observed.some(url => url.endsWith('/openjpeg_nowasm_fallback.js'))).toBe(blockWasm);
+    expectLocalDecoderRequests(page, resources.observed);
     await page.getByRole('button', { name: '保存现场', exact: true }).click();
     await expect(page.getByText('已保存到本机', { exact: true })).toBeVisible();
     expect(await durableHash(page)).toBe(sourceHash);
@@ -127,15 +137,17 @@ for (const fallback of [false, true]) for (const blockWasm of [false, true]) {
     await quickFlip(page).getByRole('button', { name: '夹住此页', exact: true }).click(); await page.keyboard.press('Escape');
     if (page.viewportSize()!.width < 1024) await page.getByRole('button', { name: '夹页 1', exact: true }).click();
     const image = page.getByRole('complementary', { name: '夹页列表' }).getByRole('img', { name: '第 1 页缩略图', exact: true });
+    await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(60);
     await expectThumbnail(image);
     const evidence = await page.evaluate(() => (window as unknown as { leafspaceDecoderEvidence: { customCreated: number; customSuccess: number; customErrors: number } }).leafspaceDecoderEvidence);
-    await info.attach('thumbnail-decoder-before-assert', { body: JSON.stringify({ evidence, requests }, null, 2), contentType: 'application/json' });
-    console.log('THUMBNAIL_DECODER_EVIDENCE', info.project.name, fallback, blockWasm, JSON.stringify({ evidence, requests }));
+    const resources = await decoderResourceEvidence(page, requests);
+    await info.attach('thumbnail-decoder-before-assert', { body: JSON.stringify({ evidence, ...resources }, null, 2), contentType: 'application/json' });
+    console.log('THUMBNAIL_DECODER_EVIDENCE', info.project.name, fallback, blockWasm, JSON.stringify({ evidence, ...resources }));
     expect(evidence.customCreated).toBe(fallback ? 0 : 1);
     if (!fallback) { expect(evidence.customSuccess).toBeGreaterThan(0); expect(evidence.customErrors).toBe(0); }
     expect(requests.filter(url => url.endsWith('/openjpeg.wasm')).length).toBeGreaterThan(before);
-    expect(requests.some(url => url.endsWith('/openjpeg_nowasm_fallback.js'))).toBe(blockWasm);
-    expectLocalDecoderRequests(page, requests);
+    expect(resources.observed.some(url => url.endsWith('/openjpeg_nowasm_fallback.js'))).toBe(blockWasm);
+    expectLocalDecoderRequests(page, resources.observed);
     await expect.poll(async () => (await snapshots(page))[0]?.heldPages.map(item => item.pageNumber)).toEqual([1]);
     expect(await durableHash(page)).toBe(sourceHash);
     await info.attach('decoded-jpx-held-page', { body: await page.screenshot(), contentType: 'image/png' });

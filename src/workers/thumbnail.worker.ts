@@ -1,5 +1,6 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import 'pdfjs-dist/build/pdf.worker.mjs';
+import { WorkerCanvasFactory } from './WorkerCanvasFactory';
 import { WorkerWasmFactory } from './WorkerWasmFactory';
 import type { ThumbnailRenderRequest, ThumbnailWorkerRequest, ThumbnailWorkerResponse } from '../services/thumbnailProtocol';
 
@@ -44,6 +45,7 @@ async function ensureDocumentLoaded(documentId: string, source: ArrayBuffer, was
     cMapPacked: true,
     wasmUrl,
     WasmFactory: WorkerWasmFactory,
+    CanvasFactory: WorkerCanvasFactory,
     isEvalSupported: false,
     useWorkerFetch: false,
   });
