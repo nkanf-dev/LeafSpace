@@ -2,6 +2,76 @@ import { readFile } from 'node:fs/promises';
 import type { Page } from '@playwright/test';
 import { test, expect, BOOK_PATH, BOOK_NAME, importBook, navigateTo, snapshots, expectMainPage, reader } from './helpers';
 
+// Probe native storage independently of the app service. Linux WebKit can reject Blob
+// storage itself, so it cannot manufacture a legacy Blob record for migration.
+async function nativeBlobStorageCapability(page: Page) {
+  await page.goto('/');
+  const bytes = Array.from(await readFile(BOOK_PATH));
+  return page.evaluate(async (bytes) => {
+    const name = `leafspace-native-blob-probe-${crypto.randomUUID()}`;
+    let db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(name, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('control');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error ?? new Error('Native probe open failed'));
+    });
+    let stage = 'write';
+    const roundTrip = async (value: ArrayBuffer | Blob) => {
+      stage = 'write';
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction('control', 'readwrite');
+        const request = transaction.objectStore('control').put(value, 'pdf');
+        let requestError: DOMException | null = null;
+        request.onerror = () => { requestError = request.error; };
+        transaction.oncomplete = () => resolve();
+        transaction.onabort = () => reject(requestError ?? transaction.error ?? new Error('Native probe write aborted'));
+      });
+      db.close();
+      stage = 'reopen';
+      db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(name);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error ?? new Error('Native probe reopen failed'));
+      });
+      stage = 'read';
+      return new Promise<ArrayBuffer | Blob>((resolve, reject) => {
+        const transaction = db.transaction('control', 'readonly');
+        const request = transaction.objectStore('control').get('pdf');
+        let result: ArrayBuffer | Blob;
+        let requestError: DOMException | null = null;
+        request.onsuccess = () => { result = request.result; };
+        request.onerror = () => { requestError = request.error; };
+        transaction.oncomplete = () => resolve(result);
+        transaction.onabort = () => reject(requestError ?? transaction.error ?? new Error('Native probe read aborted'));
+      });
+    };
+    const matches = (buffer: ArrayBuffer) => {
+      const actual = new Uint8Array(buffer);
+      return actual.length === bytes.length && actual.every((value, index) => value === bytes[index]);
+    };
+    try {
+      const control = await roundTrip(new Uint8Array(bytes).buffer);
+      if (!(control instanceof ArrayBuffer) || !matches(control)) throw new Error('Native ArrayBuffer storage control failed');
+      let stored: ArrayBuffer | Blob;
+      try { stored = await roundTrip(new Blob([new Uint8Array(bytes)], { type: 'application/pdf' })); }
+      catch (error) {
+        return { bytesRoundTrip: true, blobRoundTrip: false, stage, errorName: error instanceof Error || error instanceof DOMException ? error.name : '',
+          errorMessage: error instanceof Error || error instanceof DOMException ? error.message : String(error) };
+      }
+      if (!(stored instanceof Blob) || !matches(await stored.arrayBuffer())) throw new Error('Native Blob read-back differs from source');
+      return { bytesRoundTrip: true, blobRoundTrip: true, stage: 'complete', errorName: '', errorMessage: '' };
+    } finally {
+      db.close();
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.deleteDatabase(name);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error ?? new Error('Native probe cleanup failed'));
+        request.onblocked = () => reject(new Error('Native probe cleanup blocked'));
+      });
+    }
+  }, bytes);
+}
+
 async function seedLegacyBook(page: Page, format: 'bytes' | 'blob') {
   await page.goto('/'); await importBook(page); await navigateTo(page, 7);
   await page.getByRole('button', { name: '夹住此页', exact: true }).click();
@@ -30,13 +100,15 @@ async function seedLegacyBook(page: Page, format: 'bytes' | 'blob') {
         const db = request.result;
         const transaction = db.transaction(['books', 'workspaces'], 'readwrite');
         const data = new Uint8Array(bytes);
-        transaction.objectStore('books').put({ documentId: snapshot.documentId, fileName: name,
+        const write = transaction.objectStore('books').put({ documentId: snapshot.documentId, fileName: name,
           fileSize: bytes.length, totalPages: 12, lastOpenedAt: snapshot.savedAt, lastSavedAt: snapshot.savedAt,
           ...(format === 'bytes' ? { bytes: data.buffer } : { blob: new Blob([data], { type: 'application/pdf' }) }),
         });
         transaction.objectStore('workspaces').put(snapshot);
+        let requestError: DOMException | null = null;
+        write.onerror = () => { requestError = write.error; };
         transaction.oncomplete = () => { db.close(); resolve(); };
-        transaction.onabort = transaction.onerror = () => { db.close(); reject(transaction.error); };
+        transaction.onabort = () => { db.close(); reject(requestError ?? transaction.error ?? new Error('Legacy seed transaction aborted')); };
       };
     });
   }, { snapshot, bytes, format, name: BOOK_NAME });
@@ -80,7 +152,16 @@ async function probe(page: Page) {
 }
 
 for (const format of ['bytes', 'blob'] as const) {
-  test(`upgrades the legacy ${format} library without rewriting its PDF and keeps warm saves lightweight`, async ({ page }, info) => {
+  test(`upgrades the legacy ${format} library without rewriting its PDF and keeps warm saves lightweight`, async ({ page, browserName, browser }, info) => {
+    if (format === 'blob') {
+      const capability = await nativeBlobStorageCapability(page);
+      await info.attach('native-blob-storage-capability', { body: JSON.stringify({ browserName, browserVersion: browser.version(), platform: process.platform, ...capability }), contentType: 'application/json' });
+      const knownLinuxWebKitFailure = process.platform === 'linux' && browserName === 'webkit'
+        && !capability.blobRoundTrip && capability.stage === 'write' && capability.errorName === 'UnknownError'
+        && capability.errorMessage === 'Error preparing Blob/File data to be stored in object store';
+      test.skip(knownLinuxWebKitFailure, 'Native Linux WebKit rejects Blob storage before the app can create a legacy record; ArrayBuffer control passed');
+      expect(capability.blobRoundTrip, JSON.stringify(capability)).toBe(true);
+    }
     const before = await seedLegacyBook(page, format);
     await installStorageProbe(page); await page.reload();
     await page.getByRole('button', { name: new RegExp(BOOK_NAME) }).click();
