@@ -122,6 +122,10 @@ npm run test:e2e
 
 See [browser coverage and evidence](src/tests/e2e/README.md) for scenarios and artifact interpretation.
 
+### Site icons
+
+`public/leafspace-icon-v1.svg` is the source for the paper-leaf mark. Run `npm run icons:generate` to regenerate the 16/32/48 px ICO, PNG browser fallback, and opaque 180/192/512 px home-screen icons. When changing the design, bump the versioned filenames, manifest links, and favicon query in `index.html` together so browsers request the new artwork. The manifest keeps browser launch mode; it does not add offline caching or a service worker.
+
 ### Touch and timeline navigation
 
 - In grab mode, a deliberate left/right swipe turns the touched reader page when its paper fits horizontally. At zoom overflow, one finger pans naturally instead; vertical scrolling and text selection remain native.

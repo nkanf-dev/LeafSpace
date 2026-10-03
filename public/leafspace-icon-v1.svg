@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>LeafSpace</title>
+  <rect width="64" height="64" rx="14" fill="#292524" />
+  <path d="M18 45C11 26 27 14 48 16C50 37 38 52 18 45Z" fill="#fcfaf6" />
+  <path d="M17 49L38 28" fill="none" stroke="#292524" stroke-width="4" stroke-linecap="round" />
+</svg>
