@@ -132,7 +132,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     const horizontalPadding = window.innerWidth < 640 ? 32 : 80;
     // 100% is a paper-sized page that fits the current reader. Zoom stays relative
     // to that baseline so mobile and narrow comparison panes are readable by default.
-    if (container.clientWidth > 0) setPageWidth(Math.min(612, Math.max(1, container.clientWidth - horizontalPadding)));
+    if (container.clientWidth > 0) setPageWidth(Math.min(612, Math.max(1, container.clientWidth - horizontalPadding - 2)));
     const availableWidth = Math.max(0, container.clientWidth - horizontalPadding);
 
     setShouldCenterHorizontally(contentFrame.offsetWidth <= availableWidth + 2);

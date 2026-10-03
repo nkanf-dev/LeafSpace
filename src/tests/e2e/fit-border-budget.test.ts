@@ -9,7 +9,7 @@ test('measures the complete bordered paper at nominal fit width', async ({ page 
     await expect.poll(() => reader(page).evaluate(element => {
       const canvas = element.querySelector('canvas')!;
       const padding = innerWidth < 640 ? 32 : 80;
-      return Math.abs(canvas.getBoundingClientRect().width - Math.floor(Math.min(612, Math.max(1, element.clientWidth - padding))));
+      return Math.abs(canvas.getBoundingClientRect().width - Math.floor(Math.min(612, Math.max(1, element.clientWidth - padding - 2))));
     })).toBeLessThan(0.1);
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const geometry = await reader(page).evaluate(element => {
@@ -28,4 +28,41 @@ test('measures the complete bordered paper at nominal fit width', async ({ page 
   }
   await info.attach('fit-border-geometry', { body: JSON.stringify(entries, null, 2), contentType: 'application/json' });
   for (const entry of entries) expect.soft(entry.horizontalRange, `No horizontal scrolling at 100% in ${entry.viewportWidth}px viewport`).toBe(0);
+});
+
+test('fit width remains stable near classic scrollbar height thresholds', async ({ page }, info) => {
+  await page.setViewportSize({ width: 390, height: 900 }); await page.goto('/'); await importBook(page);
+  await reader(page).evaluate(element => {
+    const events: object[] = [];
+    const frame = element.querySelector('.w-max')!;
+    const observer = new ResizeObserver(() => events.push({ type: 'resize', time: performance.now(), clientWidth: element.clientWidth, clientHeight: element.clientHeight }));
+    observer.observe(element); observer.observe(frame);
+    window.addEventListener('error', event => events.push({ type: 'error', time: performance.now(), message: event.message }));
+    (window as unknown as { fitEvents: object[] }).fitEvents = events;
+  });
+  const series = [];
+  for (const height of [844, 839, 844, 854, 844]) {
+    await page.setViewportSize({ width: 390, height });
+    const samples = await reader(page).evaluate(async element => {
+      const entries = [];
+      for (let index = 0; index < 120; index++) {
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        const canvas = element.querySelector('canvas')!, frame = element.querySelector<HTMLElement>('.w-max')!;
+        const paper = canvas.getBoundingClientRect();
+        entries.push({ clientWidth: element.clientWidth, clientHeight: element.clientHeight, scrollWidth: element.scrollWidth,
+          scrollHeight: element.scrollHeight, frameWidth: frame.style.width, frameHeight: frame.style.height,
+          canvasWidth: paper.width, canvasHeight: paper.height, gutter: getComputedStyle(element).scrollbarGutter });
+      }
+      return entries;
+    });
+    series.push({ height, samples });
+  }
+  const events = await page.evaluate(() => (window as unknown as { fitEvents: object[] }).fitEvents);
+  await info.attach('fit-height-stability', { body: JSON.stringify({ series, events }), contentType: 'application/json' });
+  await info.attach('fit-height-final-screen', { body: await page.screenshot(), contentType: 'image/png' });
+  for (const { height, samples } of series) {
+    const tail = samples.slice(-60);
+    expect.soft(new Set(tail.map(sample => JSON.stringify(sample))).size, `Stable geometry at height ${height}`).toBe(1);
+    expect.soft(tail.every(sample => sample.scrollWidth === sample.clientWidth), `No horizontal range at height ${height}`).toBe(true);
+  }
 });
