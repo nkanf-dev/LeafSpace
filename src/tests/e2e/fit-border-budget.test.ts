@@ -92,3 +92,26 @@ test('fit width remains stable near classic scrollbar height thresholds', async 
     expect.soft(tail.every(sample => sample.scrollWidth === sample.clientWidth), `No horizontal range at height ${height}`).toBe(true);
   }
 });
+
+test('static scrollbar isolation without React PDF or app styling', async ({ page }, info) => {
+  const variants = [
+    { id: 'native-auto', custom: false, gutter: 'auto', overflow: 'auto' },
+    { id: 'native-stable', custom: false, gutter: 'stable', overflow: 'auto' },
+    { id: 'custom-auto', custom: true, gutter: 'auto', overflow: 'auto' },
+    { id: 'custom-stable', custom: true, gutter: 'stable', overflow: 'auto' },
+    { id: 'custom-forced', custom: true, gutter: 'auto', overflow: 'scroll' },
+  ];
+  await page.setContent(`<style>body{font:14px sans-serif;margin:16px;display:grid;grid-template-columns:repeat(3,320px);gap:20px}.custom::-webkit-scrollbar{width:10px;height:10px}.custom::-webkit-scrollbar-thumb{background:#888}</style>${variants.map(v => `<section><p>${v.id}</p><div id="${v.id}" class="${v.custom ? 'custom' : ''}" style="width:300px;height:200px;overflow-x:auto;overflow-y:${v.overflow};scrollbar-gutter:${v.gutter};background:#eee"><div style="height:100px;background:#ddd">Scrollbar control</div></div></section>`).join('')}`);
+  const measurements = [];
+  for (const height of [100, 600, 100]) {
+    await page.evaluate(height => document.querySelectorAll('section > div > div').forEach(child => (child as HTMLElement).style.height = `${height}px`), height);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    measurements.push({ height, boxes: await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('section > div')).map(element => ({
+      id: element.id, offsetWidth: element.offsetWidth, clientWidth: element.clientWidth, gutter: getComputedStyle(element).scrollbarGutter,
+      offsetHeight: element.offsetHeight, clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, overflowY: getComputedStyle(element).overflowY,
+    }))) });
+  }
+  await info.attach('static-scrollbar-measurement', { body: JSON.stringify(measurements, null, 2), contentType: 'application/json' });
+  await info.attach('static-scrollbar-screen', { body: await page.screenshot(), contentType: 'image/png' });
+  expect(measurements).toHaveLength(3);
+});

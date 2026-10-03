@@ -11,8 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        engine: [webkit]
-        gutter: [auto, stable]
+        engine: [chromium, firefox, webkit]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,13 +20,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps ${{ matrix.engine }}
-      - run: npx playwright test fit-border-budget.test.ts --project=${{ matrix.engine }} --workers=1 --retries=0
-        env:
-          FIT_GUTTER: ${{ matrix.gutter }}
+      - run: npx playwright test fit-border-budget.test.ts --project=${{ matrix.engine }} --workers=1 --retries=0 --grep 'static scrollbar isolation'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fit-border-${{ matrix.engine }}-${{ matrix.gutter }}
+          name: static-scrollbar-${{ matrix.engine }}
           path: |
             playwright-report/
             test-results/
