@@ -143,3 +143,9 @@ button:disabled { cursor: not-allowed; }
 .thumbnail-action-target {
   -webkit-touch-callout: none;
 }
+
+/* Keep the explicitly focused full-width guidance ring inside the viewport. */
+#workspace-problem-guidance:focus {
+  outline: 2px solid #786344;
+  outline-offset: -3px;
+}

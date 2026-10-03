@@ -41,9 +41,9 @@ function setupDependencies() {
   const save = vi.spyOn(persistence, 'saveWorkspace').mockResolvedValue(undefined);
   const restore = vi.spyOn(persistence, 'loadWorkspace').mockResolvedValue(null);
   const register = vi.spyOn(persistence, 'saveBookAsset').mockResolvedValue(undefined);
-  vi.spyOn(persistence, 'listRecentBooks').mockResolvedValue([]);
+  const recent = vi.spyOn(persistence, 'listRecentBooks').mockResolvedValue([]);
   configureWorkspaceStoreDependencies({ persistenceService: persistence });
-  return { load, save, restore, register };
+  return { load, save, restore, register, recent };
 }
 function selectFile(file = new File(['%PDF-'], 'New book.pdf', { type: 'application/pdf' })) {
   fireEvent.change(screen.getByLabelText('选择 PDF 文件'), { target: { files: [file] } });
@@ -110,6 +110,145 @@ describe('App document workflows', () => {
     expect(readCurrent().enabled).toBe(false);
     await act(async () => { await workspaceStore.getState().restoreWorkspace('old-book'); });
     expect(readCurrent().enabled).toBe(true);
+  });
+
+  it('keeps a direct, non-destructive route back to dismissed restore guidance', async () => {
+    const { restore, save } = setupDependencies(); openExistingBook();
+    restore.mockRejectedValueOnce(new Error('Unread saved workspace'));
+    await workspaceStore.getState().restoreWorkspace('old-book');
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '关闭提示' }));
+    const details = screen.getByRole('button', { name: /查看.*问题/ });
+    expect(details).toHaveFocus();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(details);
+    expect(screen.getByRole('alert')).toHaveTextContent('Unread saved workspace');
+    expect(screen.getByRole('button', { name: '重试恢复' })).toBeEnabled();
+    expect(restore).toHaveBeenCalledTimes(1); expect(save).not.toHaveBeenCalled();
+    expect(workspaceStore.getState().unrestoredDocumentId).toBe('old-book');
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '重试恢复' })));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /查看.*问题/ })).not.toBeInTheDocument();
+    expect(workspaceStore.getState().unrestoredDocumentId).toBeNull();
+  });
+
+  it('resurfaces a repeated blocked library transition after its identical guidance was dismissed', async () => {
+    const { restore, save } = setupDependencies(); openExistingBook();
+    restore.mockRejectedValueOnce(new Error('Unread saved workspace'));
+    await workspaceStore.getState().restoreWorkspace('old-book');
+    render(<App />);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      fireEvent.click(screen.getByRole('button', { name: '关闭提示' }));
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: '回到书库' })));
+      expect(screen.getByRole('alert')).toHaveTextContent('上次阅读现场尚未恢复');
+      expect(screen.getByRole('button', { name: '重试恢复' })).toBeEnabled();
+    }
+    expect(save).not.toHaveBeenCalled();
+    expect(useBookStore.getState().documentId).toBe('old-book');
+  });
+
+  it('names restoration rather than saving when an unread snapshot blocks importing', async () => {
+    const { restore, save, load } = setupDependencies(); openExistingBook();
+    restore.mockRejectedValueOnce(new Error('Unread saved workspace'));
+    await workspaceStore.getState().restoreWorkspace('old-book'); render(<App />);
+    await act(async () => { selectFile(); });
+    expect(screen.getByRole('alert')).toHaveTextContent('请先重试恢复');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('请重试保存');
+    expect(save).not.toHaveBeenCalled(); expect(load).not.toHaveBeenCalled();
+  });
+
+  it.each(['restore', 'save', 'register', 'recent', 'open'] as const)(
+    'keeps %s guidance reachable without starting a recovery operation', async operation => {
+      const { save, restore, register, load, recent } = setupDependencies();
+      if (operation !== 'recent' && operation !== 'open') openExistingBook();
+      await act(async () => { render(<App />); });
+      const recentCalls = recent.mock.calls.length;
+      act(() => workspaceStore.setState({ error: 'Synthetic operation problem', errorOperation: operation, status: 'error' }));
+      const details = screen.getByRole('button', { name: '查看问题' });
+      expect(details).toHaveAttribute('aria-expanded', 'true');
+      expect(details).toHaveAttribute('aria-controls', 'workspace-problem-guidance');
+      fireEvent.click(screen.getByRole('button', { name: '关闭提示' }));
+      expect(details).toHaveFocus(); expect(details).toHaveAttribute('aria-expanded', 'false');
+      expect(details).not.toHaveAttribute('aria-controls');
+      fireEvent.click(details);
+      expect(screen.getByRole('alert', { name: '问题详情' })).toHaveFocus();
+      for (const call of [save, restore, register, load]) expect(call).not.toHaveBeenCalled();
+      expect(workspaceStore.getState().errorOperation).toBe(operation);
+      expect(recent).toHaveBeenCalledTimes(recentCalls);
+    },
+  );
+
+  it('reopens a workflow error while storage is idle and does not steal focus for a new background error', async () => {
+    setupDependencies(); openExistingBook(); await act(async () => { render(<App />); });
+    selectFile(new File(['plain'], 'Notes.txt', { type: 'text/plain' }));
+    expect(workspaceStore.getState().status).toBe('idle');
+    const details = screen.getByRole('button', { name: '查看问题' });
+    fireEvent.click(screen.getByRole('button', { name: '关闭提示' })); fireEvent.click(details);
+    expect(screen.getByRole('alert')).toHaveFocus();
+    expect(screen.getByRole('alert')).toHaveTextContent('请选择 PDF 文件');
+    fireEvent.keyDown(screen.getByRole('alert'), { key: ' ' });
+    expect(quickFlipStore.getState().isOpen).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '关闭提示' }));
+    const reader = screen.getByRole('region', { name: '主阅读区' }); reader.focus();
+    act(() => useBookStore.setState({ error: 'New parse failure' }));
+    // The workflow message remains authoritative, and ordinary state changes never request focus.
+    expect(reader).toHaveFocus();
+  });
+
+  it('reveals a new error after dismissal without taking the reader focus', async () => {
+    setupDependencies(); openExistingBook(); await act(async () => { render(<App />); });
+    act(() => workspaceStore.setState({ error: 'First failure', errorOperation: 'save', status: 'error' }));
+    fireEvent.click(screen.getByRole('button', { name: '关闭提示' }));
+    const reader = screen.getByRole('region', { name: '主阅读区' }); reader.focus();
+    act(() => workspaceStore.setState({ error: 'Another failure' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Another failure');
+    expect(reader).toHaveFocus();
+  });
+
+  it('does not let a pending reveal override newer focus or enter an inert surface', async () => {
+    setupDependencies(); openExistingBook();
+    workspaceStore.setState({ error: 'Synthetic failure', errorOperation: 'save', status: 'error' });
+    await act(async () => { render(<App />); });
+    const details = screen.getByRole('button', { name: '查看问题' });
+    const reader = screen.getByRole('region', { name: '主阅读区' });
+    fireEvent.click(screen.getByRole('button', { name: '关闭提示' }));
+    act(() => { details.click(); reader.focus(); });
+    expect(reader).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: '关闭提示' }));
+    act(() => { details.click(); quickFlipStore.getState().open(8); });
+    expect(screen.getByRole('alert', { hidden: true })).not.toHaveFocus();
+  });
+
+  it('returns a removed problem action to the status only when its reveal still owns focus', async () => {
+    setupDependencies(); openExistingBook();
+    workspaceStore.setState({ error: 'Synthetic failure', errorOperation: 'save', status: 'error' });
+    await act(async () => { render(<App />); });
+    fireEvent.click(screen.getByRole('button', { name: '关闭提示' }));
+    const details = screen.getByRole('button', { name: '查看问题' });
+    act(() => { details.click(); workspaceStore.getState().clearError(); });
+    expect(screen.getByRole('status')).toHaveFocus();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('uses the visible import action when a revealed library problem disappears without status text', async () => {
+    setupDependencies(); await act(async () => { render(<App />); });
+    act(() => workspaceStore.setState({ error: 'Recent list unavailable', errorOperation: 'recent', status: 'error' }));
+    expect(screen.getByRole('status')).toHaveTextContent('操作遇到问题');
+    fireEvent.click(screen.getByRole('button', { name: '关闭提示' }));
+    const details = screen.getByRole('button', { name: '查看问题' });
+    act(() => { details.click(); workspaceStore.getState().clearError(); });
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+    expect(screen.getByRole('button', { name: '导入书籍' })).toHaveFocus();
+  });
+
+  it('keeps a PDF loading error reachable even when there is no workspace error', async () => {
+    setupDependencies(); await act(async () => { render(<App />); });
+    act(() => useBookStore.setState({ error: 'Synthetic PDF loading failure', status: 'error' }));
+    fireEvent.click(screen.getByRole('button', { name: '关闭提示' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看问题' }));
+    expect(screen.getByRole('alert')).toHaveFocus();
+    expect(screen.getByRole('button', { name: '重新导入' })).toBeEnabled();
+    expect(workspaceStore.getState().error).toBeNull();
   });
 
   it('warns immediately about unsaved reading changes and stops after they are saved', async () => {
@@ -444,7 +583,10 @@ describe('App document workflows', () => {
     render(<App />);
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '保存现场' })));
     expect(screen.getByRole('button', { name: '取消覆盖' })).toHaveAccessibleDescription(/替换它/);
-    screen.getByRole('region', { name: '主阅读区' }).focus();
+    fireEvent.click(screen.getByRole('button', { name: '查看问题' }));
+    expect(screen.getByRole('group', { name: '确认替换上次现场' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '关闭提示' }));
+    expect(screen.getByRole('button', { name: '查看问题' })).toHaveFocus();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('group', { name: '确认替换上次现场' })).not.toBeInTheDocument();
     expect(windowStore.getState().windows.some(window => window.id === reference)).toBe(true);
