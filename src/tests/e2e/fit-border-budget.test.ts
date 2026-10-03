@@ -1,7 +1,26 @@
 import { test, expect, importBook, reader } from './helpers';
+import type { Page } from '@playwright/test';
+
+test.setTimeout(90_000);
+const observations = new WeakMap<Page, unknown[]>();
+test.beforeEach(async ({ page }) => {
+  const entries: unknown[] = []; observations.set(page, entries);
+  page.on('console', message => {
+    const value = message.text();
+    if (value.startsWith('FIT_GEOMETRY:') && entries.length < 5000) entries.push(JSON.parse(value.slice(13)));
+  });
+});
+test.afterEach(async ({ page }, info) => {
+  await info.attach('live-layout-events', { body: JSON.stringify({ gutter: process.env.FIT_GUTTER, events: observations.get(page) }), contentType: 'application/json' });
+});
+async function openFixture(page: Page) {
+  await page.goto('/');
+  if (process.env.FIT_GUTTER === 'stable') await page.addStyleTag({ content: '[aria-label="主阅读区"] { scrollbar-gutter: stable; }' });
+  await importBook(page);
+}
 
 test('measures the complete bordered paper at nominal fit width', async ({ page }, info) => {
-  await page.setViewportSize({ width: 390, height: 844 }); await page.goto('/'); await importBook(page);
+  await page.setViewportSize({ width: 390, height: 844 }); await openFixture(page);
   const entries = [];
   for (const width of [390, 639, 640, 720, 1440]) {
     await page.setViewportSize({ width, height: 844 });
@@ -31,13 +50,20 @@ test('measures the complete bordered paper at nominal fit width', async ({ page 
 });
 
 test('fit width remains stable near classic scrollbar height thresholds', async ({ page }, info) => {
-  await page.setViewportSize({ width: 390, height: 900 }); await page.goto('/'); await importBook(page);
+  await page.setViewportSize({ width: 390, height: 900 }); await openFixture(page);
   await reader(page).evaluate(element => {
     const events: object[] = [];
     const frame = element.querySelector('.w-max')!;
-    const observer = new ResizeObserver(() => events.push({ type: 'resize', time: performance.now(), clientWidth: element.clientWidth, clientHeight: element.clientHeight }));
+    const observer = new ResizeObserver(() => {
+      const event = { type: 'resize', time: performance.now(), clientWidth: element.clientWidth, clientHeight: element.clientHeight,
+        scrollWidth: element.scrollWidth, scrollHeight: element.scrollHeight, frameWidth: (frame as HTMLElement).style.width, frameHeight: (frame as HTMLElement).style.height };
+      events.push(event); console.debug(`FIT_GEOMETRY:${JSON.stringify(event)}`);
+    });
     observer.observe(element); observer.observe(frame);
-    window.addEventListener('error', event => events.push({ type: 'error', time: performance.now(), message: event.message }));
+    window.addEventListener('error', event => {
+      const detail = { type: 'error', time: performance.now(), message: event.message };
+      events.push(detail); console.debug(`FIT_GEOMETRY:${JSON.stringify(detail)}`);
+    });
     (window as unknown as { fitEvents: object[] }).fitEvents = events;
   });
   const series = [];

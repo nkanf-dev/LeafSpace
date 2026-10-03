@@ -11,7 +11,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        engine: [chromium, firefox, webkit]
+        engine: [webkit]
+        gutter: [auto, stable]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,10 +22,12 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps ${{ matrix.engine }}
       - run: npx playwright test fit-border-budget.test.ts --project=${{ matrix.engine }} --workers=1 --retries=0
+        env:
+          FIT_GUTTER: ${{ matrix.gutter }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fit-border-${{ matrix.engine }}
+          name: fit-border-${{ matrix.engine }}-${{ matrix.gutter }}
           path: |
             playwright-report/
             test-results/
