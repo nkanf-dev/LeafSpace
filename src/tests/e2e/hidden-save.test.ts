@@ -32,8 +32,8 @@ async function installFault(page: Page) {
 }
 async function fault(page: Page, changes: Partial<{ failSave: boolean; failRestore: boolean; puts: number }> = {}) {
   return page.evaluate(changes => {
-    const state = (window as unknown as { leafspaceHiddenFault: { failSave: boolean; failRestore: boolean; puts: number } }).leafspaceHiddenFault;
-    Object.assign(state, changes); return state;
+    const state = (window as unknown as { leafspaceHiddenFault: { failSave: boolean; failRestore: boolean; puts: number; writes: unknown[] } }).leafspaceHiddenFault;
+    Object.assign(state, changes); if (changes.puts === 0) state.writes = []; return state;
   }, changes);
 }
 
@@ -57,23 +57,31 @@ test('hidden lifecycle starts the pending save while the visible debounce remain
 test('failed hidden saving remains explicit and does not retry on visibility or alert dismissal', async ({ page }, info) => {
   await installFault(page); await page.clock.install(); await page.goto('/'); await importBook(page);
   await expect(page.getByText('已保存到本机', { exact: true })).toBeVisible();
+  await reader(page).focus(); await freezeDebounce(page);
+  // pauseAt advances time: arm the fault only after the earlier focus save settled.
   await fault(page, { failSave: true, puts: 0 });
-  await reader(page).focus(); await freezeDebounce(page); await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('alert')).toHaveCount(0);
   await visibility(page, true);
   await expect(page.getByRole('alert')).toContainText('Synthetic hidden save failure');
   expect((await fault(page)).puts).toBe(1);
-  await visibility(page, false); await visibility(page, true);
+  await visibility(page, false);
   await page.getByRole('button', { name: '关闭提示', exact: true }).click();
-  await visibility(page, true);
+  await visibility(page, true); await visibility(page, true);
   expect((await fault(page)).puts).toBe(1);
   expect((await snapshots(page))[0].currentPage).toBe(1);
-  await fault(page, { failSave: false }); await page.clock.resume();
+  await visibility(page, false); await page.clock.resume(); await expectMainPage(page, 2);
+  await page.clock.runFor(1_000);
+  expect((await fault(page)).puts).toBe(1);
+  await fault(page, { failSave: false });
   await page.getByRole('button', { name: '保存现场', exact: true }).click();
   await expect(page.getByText('已保存到本机', { exact: true })).toBeVisible();
   expect((await snapshots(page))[0].currentPage).toBe(2);
   await info.attach('hidden-retry-write-snapshots', { body: JSON.stringify(await fault(page), null, 2), contentType: 'application/json' });
   expect((await fault(page)).puts).toBe(2);
-  await visibility(page, false); await reopenRecent(page); await expectMainPage(page, 2);
+  await page.clock.runFor(1_500);
+  expect((await fault(page)).puts).toBe(2);
+  await reopenRecent(page); await expectMainPage(page, 2);
   await info.attach('hidden-save-explicit-recovery', { body: await page.screenshot(), contentType: 'image/png' });
 });
 
