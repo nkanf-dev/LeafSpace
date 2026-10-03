@@ -38,14 +38,14 @@ function readerRegion() {
   return screen.getByRole('region', { name: /阅读区/ });
 }
 
-function mockScrollGeometry(element: HTMLElement) {
+function mockScrollGeometry(element: HTMLElement, integerOffsets = false) {
   let width = 400, height = 300, scrollWidth = 900, scrollHeight = 1200;
   let left = element.scrollLeft, top = element.scrollTop;
   Object.defineProperties(element, {
     clientWidth: { configurable: true, get: () => width }, clientHeight: { configurable: true, get: () => height },
     scrollWidth: { configurable: true, get: () => scrollWidth }, scrollHeight: { configurable: true, get: () => scrollHeight },
-    scrollLeft: { configurable: true, get: () => left, set: (value: number) => { left = Math.max(0, Math.min(value, scrollWidth - width)); } },
-    scrollTop: { configurable: true, get: () => top, set: (value: number) => { top = Math.max(0, Math.min(value, scrollHeight - height)); } },
+    scrollLeft: { configurable: true, get: () => left, set: (value: number) => { left = Math.max(0, Math.min(integerOffsets ? Math.round(value) : value, scrollWidth - width)); } },
+    scrollTop: { configurable: true, get: () => top, set: (value: number) => { top = Math.max(0, Math.min(integerOffsets ? Math.round(value) : value, scrollHeight - height)); } },
   });
   return (next: { width?: number; height?: number; scrollWidth?: number; scrollHeight?: number }) => {
     width = next.width ?? width; height = next.height ?? height; scrollWidth = next.scrollWidth ?? scrollWidth; scrollHeight = next.scrollHeight ?? scrollHeight;
@@ -218,6 +218,110 @@ describe('ReaderViewport', () => {
     act(() => resizeCallbacks.forEach(callback => callback()));
     expect(readerRegion().scrollTop).toBe(300);
     expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 150, scrollTop: 300 });
+  });
+
+  function prepareAnimatedReader(integerOffsets = false, completeRender = true) {
+    let nextId = 0;
+    const frames = new Map<number, FrameRequestCallback>();
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { const id = ++nextId; frames.set(id, callback); return id; });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => { frames.delete(id); });
+    const frame = () => act(() => { const current = [...frames.values()]; frames.clear(); current.forEach(callback => callback(0)); });
+    loadDocument(); render(<ReaderViewport isMain windowId="main" />);
+    const region = readerRegion(); mockScrollGeometry(region, integerOffsets);
+    act(() => resizeCallbacks.forEach(callback => callback()));
+    if (completeRender) { fireEvent.click(screen.getByRole('button', { name: 'Complete PDF render' })); frame(); }
+    return { region, frames, frame, settle: () => { for (let index = 0; frames.size && index < 100; index++) frame(); } };
+  }
+  it.each([false, true])('retains the newest pan destination through its own saved-scroll echo (released=%s)', released => {
+    const { region, frame, frames, settle } = prepareAnimatedReader();
+    fireEvent.mouseDown(region, { button: 0, clientX: 200, clientY: 200 });
+    fireEvent.mouseMove(region, { buttons: 1, clientX: 150, clientY: 150 }); frame();
+    const intermediate = region.scrollTop; expect(intermediate).toBeGreaterThan(0);
+    fireEvent.mouseMove(region, { buttons: 1, clientX: 70, clientY: 70 });
+    if (released) fireEvent.mouseUp(region);
+    fireEvent.scroll(region); // Older animation frame's event arrives after newer input.
+    expect(windowStore.getState().windows[0].viewport?.scrollTop).toBe(intermediate);
+    settle();
+    expect(region.scrollTop).toBeCloseTo(195); expect(region.scrollLeft).toBeCloseTo(195);
+    expect(frames.size).toBe(0);
+    fireEvent.scroll(region);
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 195, scrollTop: 195 });
+  });
+  it.each([false, true])('external same-page restoration owns pending pan even at equal offsets (equal=%s)', equal => {
+    const { region, frame, frames, settle } = prepareAnimatedReader();
+    fireEvent.mouseDown(region, { button: 0, clientX: 200, clientY: 200 });
+    fireEvent.mouseMove(region, { buttons: 1, clientX: 70, clientY: 70 }); frame();
+    const desired = equal ? region.scrollTop : 60;
+    region.scrollTop += 10; // An undelivered old scroll must not replace the external restore.
+    act(() => windowStore.getState().updateWindow('main', { viewport: { scrollLeft: 30, scrollTop: desired, scale: 1, mode: 'grab' } }));
+    fireEvent.scroll(region); fireEvent.mouseMove(region, { buttons: 1, clientX: 20, clientY: 20 }); settle();
+    expect(region.scrollTop).toBe(desired); expect(region.scrollLeft).toBe(30);
+    expect(region).toHaveStyle({ cursor: 'grab' }); expect(frames.size).toBe(0);
+  });
+  it.each(['rounded', 'past-start', 'past-end'] as const)('settles %s pan targets without endless animation frames', scenario => {
+    const { region, frames, settle } = prepareAnimatedReader(scenario === 'rounded');
+    fireEvent.mouseDown(region, { button: 0, clientX: 200, clientY: 200 });
+    const next = scenario === 'rounded' ? 161 : scenario === 'past-start' ? 1200 : -1200;
+    fireEvent.mouseMove(region, { buttons: 1, clientX: next, clientY: next }); fireEvent.mouseUp(region);
+    settle();
+    expect(frames.size).toBe(0);
+    expect(region.scrollTop).toBe(scenario === 'rounded' ? 59 : scenario === 'past-start' ? 0 : 900);
+  });
+  it('does not restart externally cancelled input on a late release while PDF paint is pending', () => {
+    const { region, frame, frames, settle } = prepareAnimatedReader(false, false);
+    fireEvent.mouseDown(region, { button: 0, clientX: 200, clientY: 200 });
+    fireEvent.mouseMove(region, { buttons: 1, clientX: 70, clientY: 70 }); frame();
+    const intermediate = region.scrollTop;
+    act(() => windowStore.getState().updateWindow('main', { viewport: { scrollLeft: 30, scrollTop: 60, scale: 1, mode: 'grab' } }));
+    fireEvent.mouseUp(region); fireEvent.mouseLeave(region); settle();
+    expect(region.scrollTop).toBe(intermediate); expect(frames.size).toBe(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Complete PDF render' })); frame();
+    expect(region.scrollTop).toBe(60); expect(region.scrollLeft).toBe(30);
+  });
+  it.each(['恢复适合宽度', '选择文字'])('%s owns the paper instead of an older settling pan', control => {
+    const { region, frame, frames, settle } = prepareAnimatedReader();
+    fireEvent.mouseDown(region, { button: 0, clientX: 200, clientY: 200 });
+    fireEvent.mouseMove(region, { buttons: 1, clientX: 70, clientY: 70 }); frame(); fireEvent.mouseUp(region);
+    const intermediate = region.scrollTop;
+    fireEvent.click(screen.getByRole('button', { name: control })); settle();
+    expect(region.scrollTop).toBe(control === '恢复适合宽度' ? 0 : intermediate);
+    expect(frames.size).toBe(0);
+  });
+  it.each(['wheel', 'native-scroll'])('%s interrupts an older released-pan destination', input => {
+    const { region, frame, frames, settle } = prepareAnimatedReader();
+    fireEvent.mouseDown(region, { button: 0, clientX: 200, clientY: 200 });
+    fireEvent.mouseMove(region, { buttons: 1, clientX: 70, clientY: 70 }); frame(); fireEvent.mouseUp(region);
+    if (input === 'wheel') fireEvent.wheel(region, { deltaY: 30 });
+    fireEvent.scroll(region, { target: { scrollTop: 100, scrollLeft: 80 } }); settle();
+    expect(region.scrollTop).toBe(100); expect(region.scrollLeft).toBe(80); expect(frames.size).toBe(0);
+  });
+  it.each([false, true])('native return to the saved offset cancels an older target (event delivered=%s)', delivered => {
+    const { region, frame, frames, settle } = prepareAnimatedReader();
+    fireEvent.mouseDown(region, { button: 0, clientX: 200, clientY: 200 });
+    fireEvent.mouseMove(region, { buttons: 1, clientX: 70, clientY: 70 }); frame(); fireEvent.mouseUp(region);
+    region.scrollTop = 0; region.scrollLeft = 0;
+    if (delivered) fireEvent.scroll(region);
+    settle(); expect(region.scrollTop).toBe(0); expect(region.scrollLeft).toBe(0); expect(frames.size).toBe(0);
+  });
+  it('a click without pan movement does not erase temporarily clamped restore offsets', () => {
+    const { region, frame, settle } = prepareAnimatedReader();
+    act(() => windowStore.getState().updateWindow('main', { viewport: { scrollLeft: 150, scrollTop: 300 } }));
+    const geometry = mockScrollGeometry(region); geometry({ scrollWidth: 400, scrollHeight: 300 });
+    fireEvent.scroll(region);
+    fireEvent.mouseDown(region, { button: 0, clientX: 200, clientY: 200 }); fireEvent.mouseUp(region); frame(); settle();
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 150, scrollTop: 300 });
+    geometry({ scrollWidth: 900, scrollHeight: 1200 }); act(() => resizeCallbacks.forEach(callback => callback()));
+    expect(region.scrollLeft).toBe(150); expect(region.scrollTop).toBe(300);
+  });
+  it('vertical pan completion preserves an untouched temporarily clamped horizontal restore target', () => {
+    const { region, settle } = prepareAnimatedReader();
+    act(() => windowStore.getState().updateWindow('main', { viewport: { scrollLeft: 150, scrollTop: 300 } }));
+    const geometry = mockScrollGeometry(region); geometry({ scrollWidth: 400 }); fireEvent.scroll(region);
+    fireEvent.mouseDown(region, { button: 0, clientX: 200, clientY: 200 });
+    fireEvent.mouseMove(region, { buttons: 1, clientX: 200, clientY: 70 }); fireEvent.mouseUp(region); settle();
+    expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 150, scrollTop: 495 });
+    geometry({ scrollWidth: 900 }); act(() => resizeCallbacks.forEach(callback => callback()));
+    expect(region.scrollLeft).toBe(150); expect(region.scrollTop).toBe(495);
   });
 
   it('retains restore targets across geometry collapse and rapid scale/mode changes', () => {
