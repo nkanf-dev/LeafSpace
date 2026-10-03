@@ -16,6 +16,7 @@ test.afterEach(async ({ page }, info) => {
 async function openFixture(page: Page) {
   await page.goto('/');
   if (process.env.FIT_GUTTER === 'stable') await page.addStyleTag({ content: '[aria-label="主阅读区"] { scrollbar-gutter: stable; }' });
+  if (process.env.FIT_GUTTER === 'forced') await page.addStyleTag({ content: '[aria-label="主阅读区"] { overflow-y: scroll; }' });
   await importBook(page);
 }
 
@@ -77,7 +78,7 @@ test('fit width remains stable near classic scrollbar height thresholds', async 
         const paper = canvas.getBoundingClientRect();
         entries.push({ clientWidth: element.clientWidth, clientHeight: element.clientHeight, scrollWidth: element.scrollWidth,
           scrollHeight: element.scrollHeight, frameWidth: frame.style.width, frameHeight: frame.style.height,
-          canvasWidth: paper.width, canvasHeight: paper.height, gutter: getComputedStyle(element).scrollbarGutter });
+          canvasWidth: paper.width, canvasHeight: paper.height, gutter: getComputedStyle(element).scrollbarGutter, overflowY: getComputedStyle(element).overflowY });
       }
       return entries;
     });

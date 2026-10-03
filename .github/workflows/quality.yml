@@ -20,11 +20,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps ${{ matrix.engine }}
-      - run: npx playwright test fit-border-budget.test.ts --project=${{ matrix.engine }} --workers=1 --retries=0 --grep 'static scrollbar isolation'
+      - run: npx playwright test fit-border-budget.test.ts --project=${{ matrix.engine }} --workers=1 --retries=0 --grep 'measures the complete|fit width remains stable'
+        env:
+          FIT_GUTTER: forced
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: static-scrollbar-${{ matrix.engine }}
+          name: fit-forced-${{ matrix.engine }}
           path: |
             playwright-report/
             test-results/
