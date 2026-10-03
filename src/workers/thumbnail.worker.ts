@@ -1,5 +1,6 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import 'pdfjs-dist/build/pdf.worker.mjs';
+import { WorkerWasmFactory } from './WorkerWasmFactory';
 import type { ThumbnailRenderRequest, ThumbnailWorkerRequest, ThumbnailWorkerResponse } from '../services/thumbnailProtocol';
 
 // 在 Worker 内部，我们直接从核心库加载，不再设置 GlobalWorkerOptions.workerSrc
@@ -29,7 +30,7 @@ async function disposeCurrentDocument() {
   currentDocumentId = null;
 }
 
-async function ensureDocumentLoaded(documentId: string, source: ArrayBuffer) {
+async function ensureDocumentLoaded(documentId: string, source: ArrayBuffer, wasmUrl: string) {
   if (currentDocumentId === documentId && currentDocument) {
     worker.postMessage({ type: 'document-ready', documentId });
     return;
@@ -41,6 +42,8 @@ async function ensureDocumentLoaded(documentId: string, source: ArrayBuffer) {
     data: new Uint8Array(source),
     cMapUrl: `https://unpkg.com/pdfjs-dist@5.4.296/cmaps/`,
     cMapPacked: true,
+    wasmUrl,
+    WasmFactory: WorkerWasmFactory,
     isEvalSupported: false,
     useWorkerFetch: false,
   });
@@ -105,7 +108,7 @@ worker.onmessage = (event: MessageEvent<ThumbnailWorkerRequest>) => {
   renderQueue = renderQueue.then(async () => {
     if (message.type === 'load-document') {
       try {
-        await ensureDocumentLoaded(message.documentId, message.source);
+        await ensureDocumentLoaded(message.documentId, message.source, message.wasmUrl);
       } catch (error) {
         worker.postMessage({
           type: 'document-error', documentId: message.documentId,

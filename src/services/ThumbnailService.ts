@@ -1,4 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import { pdfDecoderAssetsUrl } from './pdfDecoderAssets';
 import { thumbnailStore } from '../stores/thumbnailStore';
 import type { ThumbnailWorkerRequest, ThumbnailWorkerResponse } from './thumbnailProtocol';
 
@@ -160,7 +161,7 @@ export class ThumbnailService {
     session.loading = pending;
     const sourceCopy = Uint8Array.from(session.source!);
     try {
-      worker.postMessage({ documentId: session.documentId, source: sourceCopy.buffer, type: 'load-document' } satisfies ThumbnailWorkerRequest, [sourceCopy.buffer]);
+      worker.postMessage({ documentId: session.documentId, source: sourceCopy.buffer, wasmUrl: pdfDecoderAssetsUrl(pdfjsLib.version), type: 'load-document' } satisfies ThumbnailWorkerRequest, [sourceCopy.buffer]);
     } catch (error) { pending.reject(error); }
     return pending.promise;
   }
@@ -244,7 +245,7 @@ export class ThumbnailService {
     const session = slot.session;
     if (!this.current(session)) return;
     if (!slot.document) {
-      slot.loadingTask = pdfjsLib.getDocument({ data: Uint8Array.from(session.source!), isEvalSupported: false, useWorkerFetch: false });
+      slot.loadingTask = pdfjsLib.getDocument({ data: Uint8Array.from(session.source!), wasmUrl: pdfDecoderAssetsUrl(pdfjsLib.version), isEvalSupported: false, useWorkerFetch: false });
       try { slot.document = await slot.loadingTask.promise; }
       catch (error) {
         try { await this.disposeFallback(slot); }

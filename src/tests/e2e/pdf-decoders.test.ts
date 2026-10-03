@@ -64,6 +64,11 @@ async function isolateDecoders(page: Page, fallback: boolean, blockWasm: boolean
   }, { fallback });
   return requests;
 }
+function expectLocalDecoderRequests(page: Page, requests: string[]) {
+  const directory = new URL(`pdfjs/${version}/wasm/`, page.url()).href;
+  expect(requests.length).toBeGreaterThan(0);
+  for (const url of requests) expect(url.startsWith(directory), `Decoder request stays under the mounted app base: ${url}`).toBe(true);
+}
 async function durableHash(page: Page) {
   return page.evaluate(async () => {
     const bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
@@ -92,6 +97,7 @@ for (const blockWasm of [false, true]) {
     await expectDecoded(reference.locator('canvas'));
     expect(requests.some(url => url.endsWith('/openjpeg.wasm'))).toBe(true);
     expect(requests.some(url => url.endsWith('/openjpeg_nowasm_fallback.js'))).toBe(blockWasm);
+    expectLocalDecoderRequests(page, requests);
     await page.getByRole('button', { name: '保存现场', exact: true }).click();
     await expect(page.getByText('已保存到本机', { exact: true })).toBeVisible();
     expect(await durableHash(page)).toBe(sourceHash);
@@ -108,6 +114,11 @@ for (const fallback of [false, true]) for (const blockWasm of [false, true]) {
     await page.goto('./'); await importBook(page, fixture);
     // The thumbnail assertion is deliberately independent of reader pixels so a
     // baseline failure proves this pipeline too, rather than stopping at reader.
+    // A square bitmap plus visible canvas excludes React-PDF's initial 300x150
+    // element and its hidden in-flight raster. Blank successful baseline pixels
+    // still pass this readiness check, so thumbnail failures remain independent.
+    await expect.poll(() => reader(page).locator('canvas').evaluate((canvas: HTMLCanvasElement) =>
+      canvas.width > 0 && canvas.width === canvas.height && getComputedStyle(canvas).visibility === 'visible')).toBe(true);
     const before = requests.filter(url => url.endsWith('/openjpeg.wasm')).length;
     await page.getByRole('button', { name: /^速翻/ }).click();
     await expectThumbnail(quickFlip(page).getByRole('button', { name: '选择第 1 页', exact: true }).locator('img'));
@@ -120,6 +131,7 @@ for (const fallback of [false, true]) for (const blockWasm of [false, true]) {
     if (!fallback) { expect(evidence.customSuccess).toBeGreaterThan(0); expect(evidence.customErrors).toBe(0); }
     expect(requests.filter(url => url.endsWith('/openjpeg.wasm')).length).toBeGreaterThan(before);
     expect(requests.some(url => url.endsWith('/openjpeg_nowasm_fallback.js'))).toBe(blockWasm);
+    expectLocalDecoderRequests(page, requests);
     await expect.poll(async () => (await snapshots(page))[0]?.heldPages.map(item => item.pageNumber)).toEqual([1]);
     expect(await durableHash(page)).toBe(sourceHash);
     await info.attach('decoded-jpx-held-page', { body: await page.screenshot(), contentType: 'image/png' });

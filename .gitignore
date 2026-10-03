@@ -37,3 +37,6 @@ test-results/
 
 # Wrangler local state
 .wrangler/
+
+# Generated from the installed PDF.js package by Vite configuration
+/public/pdfjs/

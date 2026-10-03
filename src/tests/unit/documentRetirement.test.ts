@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ThumbnailWorkerRequest, ThumbnailWorkerResponse } from '../../services/thumbnailProtocol';
 
 const { getDocument } = vi.hoisted(() => ({ getDocument: vi.fn() }));
-vi.mock('pdfjs-dist', () => ({ GlobalWorkerOptions: { workerSrc: '' }, getDocument }));
+vi.mock('pdfjs-dist', () => ({ GlobalWorkerOptions: { workerSrc: '' }, version: 'test', getDocument }));
 import { pdfService } from '../../services/PDFService';
 import { thumbnailService } from '../../services/ThumbnailService';
 import { bookStore, resetBookStoreDependencies } from '../../stores/bookStore';
