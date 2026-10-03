@@ -220,18 +220,28 @@ describe('ReaderViewport', () => {
     expect(windowStore.getState().windows[0].viewport).toMatchObject({ scrollLeft: 150, scrollTop: 300 });
   });
 
-  function prepareAnimatedReader(integerOffsets = false, completeRender = true) {
+  function prepareAnimatedReader(integerOffsets = false, completeRender = true, subscribeInterruption?: ComponentProps<typeof ReaderViewport>['subscribeInterruption']) {
     let nextId = 0;
     const frames = new Map<number, FrameRequestCallback>();
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { const id = ++nextId; frames.set(id, callback); return id; });
     vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => { frames.delete(id); });
     const frame = () => act(() => { const current = [...frames.values()]; frames.clear(); current.forEach(callback => callback(0)); });
-    loadDocument(); render(<ReaderViewport isMain windowId="main" />);
+    loadDocument(); render(<ReaderViewport isMain windowId="main" subscribeInterruption={subscribeInterruption} />);
     const region = readerRegion(); mockScrollGeometry(region, integerOffsets);
     act(() => resizeCallbacks.forEach(callback => callback()));
     if (completeRender) { fireEvent.click(screen.getByRole('button', { name: 'Complete PDF render' })); frame(); }
     return { region, frames, frame, settle: () => { for (let index = 0; frames.size && index < 100; index++) frame(); } };
   }
+  it('thumbnail-action ownership cancels both a held pan and its trailing release', () => {
+    let interrupt = () => {};
+    const { region, frame, frames, settle } = prepareAnimatedReader(false, true, callback => { interrupt = callback; return () => {}; });
+    fireEvent.mouseDown(region, { button: 0, clientX: 200, clientY: 200 });
+    fireEvent.mouseMove(region, { buttons: 1, clientX: 70, clientY: 70 }); frame();
+    const current = region.scrollTop;
+    act(() => interrupt());
+    fireEvent.mouseMove(region, { buttons: 1, clientX: 10, clientY: 10 }); fireEvent.mouseUp(region); settle();
+    expect(region.scrollTop).toBe(current); expect(region).toHaveStyle({ cursor: 'grab' }); expect(frames.size).toBe(0);
+  });
   it.each([false, true])('retains the newest pan destination through its own saved-scroll echo (released=%s)', released => {
     const { region, frame, frames, settle } = prepareAnimatedReader();
     fireEvent.mouseDown(region, { button: 0, clientX: 200, clientY: 200 });

@@ -20,11 +20,12 @@ interface Props {
   pageNumber?: number;
   isMain?: boolean;
   windowId?: string;
+  subscribeInterruption?: (callback: () => void) => () => void;
 }
 
 type InteractionMode = 'grab' | 'pointer';
 
-export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, windowId }) => {
+export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, windowId, subscribeInterruption }) => {
   // PDF.js defaults to enableHWA:false and requests this context hint. Context
   // attributes are fixed by the first getContext call, before the drawing effect.
   const initializeCanvas = useCallback((canvas: HTMLCanvasElement | null) => {
@@ -154,6 +155,8 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     const container = containerRef.current;
     if (container) lastAppliedScroll.current = { left: container.scrollLeft, top: container.scrollTop };
   }), [cancelPanning, windowId]);
+
+  useLayoutEffect(() => subscribeInterruption?.(cancelPanning), [cancelPanning, subscribeInterruption]);
 
   const updateContentAlignment = useCallback(() => {
     const container = containerRef.current;

@@ -115,3 +115,41 @@ test('native touch timeline previews, cancels by moving away, then commits a fre
   await expect(page.locator('header')).toContainText(`第 ${number} 页`);
   await session.detach();
 });
+
+test('native touch thumbnail holds own the original release and let fresh actions and scrolls work', async ({ page }, info) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/'); await importBook(page);
+  await page.getByRole('button', { name: /^速翻/ }).click();
+  const session = await page.context().newCDPSession(page);
+  const target = page.getByRole('button', { name: '选择第 1 页', exact: true });
+  await expect(target).toBeInViewport();
+  const start = async () => {
+    const box = await target.boundingBox(); if (!box) throw new Error('Missing thumbnail');
+    const point = { id: 1, x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await send(session, 'touchStart', [point]); return point;
+  };
+  await start();
+  const dialog = page.getByRole('dialog', { name: '第 1 页操作', exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '阅读此页', exact: true })).toBeDisabled();
+  await send(session, 'touchEnd', []);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '阅读此页', exact: true })).toBeEnabled();
+  await info.attach('native-touch-thumbnail-action-sheet', { body: await page.screenshot(), contentType: 'image/png' });
+  await dialog.getByRole('button', { name: '夹住此页', exact: true }).tap();
+  await expect(dialog).toHaveCount(0); await expect(quickFlip(page)).toBeVisible();
+  await start(); await expect(dialog).toBeVisible();
+  // Escape while the original finger is still down must not turn its release
+  // into a thumbnail click or a second dismissal of Quick Flip.
+  await page.keyboard.press('Escape'); await send(session, 'touchEnd', []);
+  await expect(dialog).toHaveCount(0); await expect(quickFlip(page)).toBeVisible();
+  const point = await start();
+  await send(session, 'touchMove', [{ ...point, x: point.x - 70 }]);
+  await page.waitForTimeout(550); await send(session, 'touchEnd', []);
+  await expect(dialog).toHaveCount(0); await expect(quickFlip(page)).toBeVisible();
+  await target.scrollIntoViewIfNeeded(); await start(); await expect(dialog).toBeVisible(); await send(session, 'touchEnd', []);
+  await dialog.getByRole('button', { name: '阅读此页', exact: true }).tap();
+  await expect(quickFlip(page)).toHaveCount(0); await expect(reader(page).locator('canvas')).toBeVisible();
+  await expect(page.locator('header')).toContainText('第 1 页');
+  await session.detach();
+});

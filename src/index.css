@@ -139,3 +139,7 @@ button:disabled { cursor: not-allowed; }
   .quick-flip-title { font-size: 1.5rem; }
   .quick-flip-card { gap: 0.5rem; }
 }
+
+.thumbnail-action-target {
+  -webkit-touch-callout: none;
+}

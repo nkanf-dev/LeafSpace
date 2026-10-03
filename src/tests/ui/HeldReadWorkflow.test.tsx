@@ -27,6 +27,87 @@ describe('held-page read intent', () => {
   });
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); resetWorkspaceStoreDependencies(); });
 
+  it('opens touch thumbnail actions without changing the reading context', async () => {
+    render(<App />);
+    const held = screen.getByRole('button', { name: '阅读第 8 页' });
+    const down = new Event('pointerdown', { bubbles: true });
+    Object.assign(down, { pointerType: 'touch', pointerId: 7, isPrimary: true, button: 0, clientX: 20, clientY: 20 });
+    fireEvent(held, down);
+    await act(async () => vi.advanceTimersByTime(500));
+    expect(screen.queryByRole('dialog', { name: '第 8 页操作' })).toBeInTheDocument();
+    expect(bookStore.getState().currentPage).toBe(3);
+    expect(bookStore.getState().scale).toBe(1.5);
+    expect(windowStore.getState().windows).toHaveLength(1);
+    expect(heldStore.getState().pages.map(page => page.pageNumber)).toEqual([8]);
+  });
+
+  function pointer(target: Element | Window, type: string, overrides = {}) {
+    fireEvent(target, Object.assign(new Event(type, { bubbles: true, cancelable: true }), { pointerType: 'touch', pointerId: 7, isPrimary: true, button: 0, clientX: 20, clientY: 20 }, overrides));
+  }
+  async function openActions() {
+    const held = screen.getByRole('button', { name: '阅读第 8 页' });
+    pointer(held, 'pointerdown');
+    await act(async () => vi.advanceTimersByTime(500));
+    return held;
+  }
+  it('does not open a pending hold after Escape in the main-only desktop workspace', async () => {
+    render(<App />);
+    pointer(screen.getByRole('button', { name: '阅读第 8 页' }), 'pointerdown');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await act(async () => vi.advanceTimersByTime(600));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(bookStore.getState().currentPage).toBe(3);
+    expect(windowStore.getState().windows).toHaveLength(1);
+  });
+  it.each(['blur', 'hidden'])('does not recover resize focus after %s interrupts the queued frame', async interruption => {
+    render(<App />); const held = await openActions(); pointer(window, 'pointerup');
+    vi.spyOn(held, 'getClientRects').mockReturnValue([new DOMRect(0, 0, 50, 50)] as unknown as DOMRectList);
+    const focus = vi.spyOn(held, 'focus');
+    fireEvent(window, new Event('resize'));
+    if (interruption === 'hidden') {
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+      fireEvent(document, new Event('visibilitychange'));
+    } else fireEvent(window, new Event('blur'));
+    await act(async () => vi.advanceTimersByTime(40));
+    expect(focus).not.toHaveBeenCalled();
+  });
+  it('keeps the original release out of action buttons and restores focus on first Escape', async () => {
+    vi.stubGlobal('innerWidth', 390); render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '夹页 1' }));
+    const held = await openActions();
+    expect(screen.getByRole('button', { name: '阅读此页' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '取消' })).toHaveFocus();
+    pointer(window, 'pointerup');
+    fireEvent.click(screen.getByRole('button', { name: '阅读此页' }), { detail: 1, clientX: 20, clientY: 20 });
+    expect(screen.getByRole('dialog', { name: '第 8 页操作' })).toBeInTheDocument();
+    expect(bookStore.getState().currentPage).toBe(3);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await act(async () => vi.advanceTimersByTime(20));
+    expect(screen.queryByRole('dialog', { name: '第 8 页操作' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '夹页 1' })).toHaveAttribute('aria-expanded', 'true');
+    expect(held).toHaveFocus();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.getByRole('button', { name: '夹页 1' })).toHaveAttribute('aria-expanded', 'false');
+  });
+  it.each(['阅读此页', '打开参考窗'])('delegates held %s only after a fresh activation', async action => {
+    render(<App />); await openActions(); pointer(window, 'pointerup');
+    fireEvent.click(screen.getByRole('button', { name: action }));
+    await act(async () => vi.advanceTimersByTime(20));
+    expect(screen.queryByRole('dialog', { name: '第 8 页操作' })).not.toBeInTheDocument();
+    expect(bookStore.getState().currentPage).toBe(action === '阅读此页' ? 8 : 3);
+    expect(windowStore.getState().windows).toHaveLength(action === '阅读此页' ? 1 : 2);
+  });
+  it('reuses linked-window removal choices instead of silently closing references', async () => {
+    const id = windowStore.getState().openInNewWindow(8);
+    render(<App />); await openActions(); pointer(window, 'pointerup');
+    fireEvent.click(screen.getByRole('button', { name: '移除夹页' }));
+    await act(async () => vi.advanceTimersByTime(20));
+    expect(screen.getByRole('group', { name: '移除第 8 页夹页选项' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '保留窗口' }));
+    expect(heldStore.getState().pages).toHaveLength(0);
+    expect(windowStore.getState().windows.some(window => window.id === id)).toBe(true);
+  });
+
   it.each(['main', 'reference'])('preserves the %s origin after a recognized slow double click', async origin => {
     const id = origin === 'main' ? 'main' : windowStore.getState().openInNewWindow(5);
     const beforePage = origin === 'main' ? 3 : 5;

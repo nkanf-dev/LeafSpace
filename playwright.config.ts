@@ -27,15 +27,15 @@ export default defineConfig({
     },
     { name: 'firefox', testIgnore: '**/native-touch.test.ts', use: { ...devices['Desktop Firefox'], viewport: { width: 1440, height: 900 } } },
     { name: 'webkit', testIgnore: '**/native-touch.test.ts', use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 900 } } },
-    { name: 'mobile-webkit', testMatch: ['**/gesture-contract.test.ts', '**/site-icons.test.ts', '**/storage-recovery.test.ts', '**/held-read-intent.test.ts'], use: { ...devices['iPhone 13'] } },
+    { name: 'mobile-webkit', testMatch: ['**/gesture-contract.test.ts', '**/site-icons.test.ts', '**/storage-recovery.test.ts', '**/held-read-intent.test.ts', '**/thumbnail-actions.test.ts'], use: { ...devices['iPhone 13'] } },
     {
       name: 'tablet',
-      testMatch: ['**/responsive.test.ts', '**/native-touch.test.ts', '**/gesture-contract.test.ts', '**/site-icons.test.ts', '**/storage-recovery.test.ts', '**/held-read-intent.test.ts'],
+      testMatch: ['**/responsive.test.ts', '**/native-touch.test.ts', '**/gesture-contract.test.ts', '**/site-icons.test.ts', '**/storage-recovery.test.ts', '**/held-read-intent.test.ts', '**/thumbnail-actions.test.ts'],
       use: { ...devices['Desktop Chrome'], viewport: { width: 768, height: 1024 }, hasTouch: true, launchOptions: executablePath ? { executablePath } : {} },
     },
     {
       name: 'mobile',
-      testMatch: ['**/responsive.test.ts', '**/native-touch.test.ts', '**/gesture-contract.test.ts', '**/site-icons.test.ts', '**/storage-recovery.test.ts', '**/held-read-intent.test.ts'],
+      testMatch: ['**/responsive.test.ts', '**/native-touch.test.ts', '**/gesture-contract.test.ts', '**/site-icons.test.ts', '**/storage-recovery.test.ts', '**/held-read-intent.test.ts', '**/thumbnail-actions.test.ts'],
       use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 }, defaultBrowserType: 'chromium', launchOptions: executablePath ? { executablePath } : {} },
     },
   ],

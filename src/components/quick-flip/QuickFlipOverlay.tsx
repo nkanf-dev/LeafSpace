@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Pin, X, ChevronLeft, ChevronRight } from 'lucide-react';
 
 import { useBookStore } from '../../stores/bookStore';
@@ -7,9 +7,13 @@ import { useHeldStore } from '../../stores/heldStore';
 import { useWindowStore } from '../../stores/windowStore';
 import { thumbnailService } from '../../services/ThumbnailService';
 import { CachedThumbnail } from '../thumbnails/CachedThumbnail';
+import type { ThumbnailActions } from '../../services/ThumbnailActions';
+import { useThumbnailLongPress } from '../../hooks/useThumbnailLongPress';
 
 interface Props {
   isVisible: boolean;
+  thumbnailActions?: ThumbnailActions;
+  interactionSuspended?: boolean;
   onClose: () => void;
   currentPage: number;
   totalPages: number;
@@ -49,7 +53,7 @@ function buildSectionMarkers(totalPages: number): number[] {
   return Array.from(markers).sort((left, right) => left - right);
 }
 
-export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentPage, totalPages, onPageChange, restoreFocusOnClose = true }) => {
+export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, thumbnailActions, interactionSuspended = false, onClose, currentPage, totalPages, onPageChange, restoreFocusOnClose = true }) => {
   const [selectedPage, setSelectedPage] = useState(currentPage);
   const [scrollAnchorPage, setScrollAnchorPage] = useState(currentPage);
   const [zoom, setZoom] = useState(1.0);
@@ -118,6 +122,30 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     }
   }, []);
 
+  const stopHeldInput = useCallback(() => {
+    holdStartTimeRef.current = null;
+    setPressedDirection(null);
+    clearExitTimelineTimer();
+    cancelStripAnimation();
+    if (alignFrameRef.current !== null) window.cancelAnimationFrame(alignFrameRef.current);
+    alignFrameRef.current = null;
+  }, [cancelStripAnimation, clearExitTimelineTimer]);
+  useLayoutEffect(() => thumbnailActions?.onInterrupt(stopHeldInput), [stopHeldInput, thumbnailActions]);
+  const longPress = useThumbnailLongPress({
+    controller: thumbnailActions, enabled: isVisible && !interactionSuspended && viewMode === 'thumbnails',
+    contextKey: `${documentUrl}:${isVisible}:${viewMode}:${zoom}`,
+    request: (page: number, opener) => ({
+      pageNumber: page, opener, fallbackFocus: () => overlayRef.current,
+      actions: [
+        { id: 'read', label: '阅读此页', run: () => { onPageChange(page); onClose(); }, focus: 'delegate' },
+        { id: 'reference', label: '打开参考窗', run: () => { openInNewWindow(page); onClose(); }, focus: 'delegate' },
+        heldPageNumbers.includes(page)
+          ? { id: 'unhold', label: '取消夹页', run: () => unholdPage(page), focus: 'restore' }
+          : { id: 'hold', label: '夹住此页', run: () => { void holdPage(page); }, focus: 'restore' },
+      ],
+    }),
+  });
+
   const animateStripScroll = useCallback((targetLeft: number) => {
     const strip = stripRef.current;
     if (!strip) {
@@ -158,6 +186,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
   const alignStripToPage = useCallback((page: number, behavior: ScrollBehavior, attempt = 0) => {
     if (!isVisible) return;
 
+    if (thumbnailActions?.ownsInput()) return;
     const strip = stripRef.current;
     if (!strip) return;
 
@@ -189,7 +218,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
 
     cancelStripAnimation();
     strip.scrollLeft = nextLeft;
-  }, [animateStripScroll, cancelStripAnimation, isVisible, totalPages]);
+  }, [animateStripScroll, cancelStripAnimation, isVisible, thumbnailActions, totalPages]);
 
   const updateSelectedPage = useCallback((updater: (page: number) => number) => {
     setSelectedPage((page) => {
@@ -224,6 +253,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
   }, [clearExitTimelineTimer]);
 
   const handleWheelInput = useCallback((deltaY: number) => {
+    if (thumbnailActions?.ownsInput()) return;
     if (viewMode === 'timeline') {
       const direction = deltaY >= 0 ? 1 : -1;
       stepSelection(direction as -1 | 1, getAcceleratedStep());
@@ -234,7 +264,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
       const factor = deltaY > 0 ? 0.92 : 1.08;
       return Math.min(2.2, Math.max(0.55, Number((value * factor).toFixed(3))));
     });
-  }, [getAcceleratedStep, stepSelection, viewMode]);
+  }, [getAcceleratedStep, stepSelection, thumbnailActions, viewMode]);
 
   const handleWheelCapture = useCallback((event: React.WheelEvent) => {
     event.preventDefault();
@@ -297,7 +327,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     clearExitTimelineTimer();
 
     const intervalTimer = window.setInterval(() => {
-      if (holdStartTimeRef.current === null) return;
+      if (thumbnailActions?.ownsInput() || holdStartTimeRef.current === null) return;
       const elapsed = performance.now() - holdStartTimeRef.current;
 
       if (viewMode === 'thumbnails' && elapsed >= ACCELERATION_THRESHOLD_MS) {
@@ -316,13 +346,13 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     return () => {
       window.clearInterval(intervalTimer);
     };
-  }, [clearExitTimelineTimer, getAcceleratedStep, isVisible, pressedDirection, scheduleTimelineExit, stepSelection, viewMode]);
+  }, [clearExitTimelineTimer, getAcceleratedStep, isVisible, pressedDirection, scheduleTimelineExit, stepSelection, thumbnailActions, viewMode]);
 
   useEffect(() => {
     if (!isVisible) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (thumbnailActions?.ownsInput() || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
       if (e.key === 'Tab') {
         const focusable = Array.from(overlayRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [tabindex="0"]') ?? []);
         const first = focusable[0];
@@ -386,6 +416,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (thumbnailActions?.ownsInput()) return;
       if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         e.preventDefault();
         setPressedDirection(null);
@@ -404,7 +435,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [clearExitTimelineTimer, holdPage, isVisible, onClose, onPageChange, openInNewWindow, pressedDirection, scheduleTimelineExit, selectedPage, stepSelection, unholdPage, viewMode]);
+  }, [clearExitTimelineTimer, holdPage, isVisible, onClose, onPageChange, openInNewWindow, pressedDirection, scheduleTimelineExit, selectedPage, stepSelection, thumbnailActions, unholdPage, viewMode]);
 
   useEffect(() => {
     if (!isVisible || viewMode !== 'thumbnails') return;
@@ -494,7 +525,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
   const selectedProgress = ((selectedPage - 1) / Math.max(1, totalPages - 1)) * 100;
 
   return (
-    <div ref={overlayRef} role="dialog" aria-modal="true" aria-label="速翻视图" tabIndex={-1} className="fixed inset-0 z-[3000] overflow-hidden" onWheelCapture={handleWheelCapture}>
+    <div ref={overlayRef} inert={interactionSuspended} role="dialog" aria-modal="true" aria-label="速翻视图" tabIndex={-1} className="fixed inset-0 z-[3000] overflow-hidden" onWheelCapture={handleWheelCapture}>
       <div className="absolute inset-0 bg-[rgba(251,250,248,0.7)] backdrop-blur-[40px]" onClick={onClose} />
       <div className="relative z-10 flex h-dvh w-full flex-col px-3 py-4 sm:px-6 sm:py-6">
         <div className="relative mb-3 shrink-0 text-center sm:mb-5">
@@ -504,7 +535,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
             <kbd className="border border-[var(--border)] bg-white px-1.5 py-0.5">←</kbd>
             <kbd className="ml-1 border border-[var(--border)] bg-white px-1.5 py-0.5">→</kbd>
             <span className="mx-2">选择</span>•
-            <span className="mx-2">长按进入时间轴</span>•
+            <span className="mx-2">长按左右键进入时间轴</span>•
             <kbd className="mx-2 border border-[var(--border)] bg-white px-1.5 py-0.5">↑</kbd>
             夹住 •
             <kbd className="mx-2 border border-[var(--border)] bg-white px-1.5 py-0.5">Enter</kbd>
@@ -514,6 +545,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
             <kbd className="mx-2 border border-[var(--border)] bg-white px-1.5 py-0.5">Shift + 点击</kbd>
             浮窗
           </div>
+          <p className="mt-1 text-xs text-stone-500">触屏长按缩略图可操作</p>
         </div>
 
         <div className="relative flex min-h-0 flex-1 items-center">
@@ -539,9 +571,12 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
                     data-page={page}
                     aria-label={`选择第 ${page} 页`}
                     aria-pressed={isSelected}
-                    className={`quick-flip-card p-${page} flex shrink-0 cursor-pointer flex-col items-center justify-center gap-6 border-0 bg-transparent px-2 transition-opacity duration-200 ${isSelected ? 'opacity-100' : 'opacity-35 hover:opacity-60'}`}
+                    className={`thumbnail-action-target quick-flip-card p-${page} flex shrink-0 cursor-pointer flex-col items-center justify-center gap-6 border-0 bg-transparent px-2 transition-opacity duration-200 ${isSelected ? 'opacity-100' : 'opacity-35 hover:opacity-60'}`}
                     style={{ width: scaledSlotWidth, minWidth: scaledSlotWidth, height: scaledSlotHeight }}
+                    onPointerDown={event => longPress.onPointerDown(event, page)}
+                    onContextMenu={longPress.onContextMenu}
                     onClick={(e) => {
+                      if (thumbnailActions?.ownsInput()) return;
                       if (e.shiftKey) {
                         openInNewWindow(page);
                         return;
@@ -550,7 +585,7 @@ export const QuickFlipOverlay: React.FC<Props> = ({ isVisible, onClose, currentP
                       latestSelectedPageRef.current = page;
                       overlayRef.current?.focus();
                     }}
-                    onDoubleClick={() => { onPageChange(page); onClose(); }}
+                    onDoubleClick={() => { if (thumbnailActions?.ownsInput()) return; onPageChange(page); onClose(); }}
                   >
                     <div
                       className={`relative flex items-center justify-center overflow-hidden border bg-white transition-transform duration-200 ${isSelected ? 'border-[3px] border-stone-900' : isHeld ? 'border-[#f5a623]' : 'border-[var(--border)]'}`}
