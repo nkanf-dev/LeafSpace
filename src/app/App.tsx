@@ -60,6 +60,14 @@ function App() {
   }, [closeQuickFlip]);
   const heldToggleRef = useRef<HTMLButtonElement>(null);
   const heldBackRef = useRef<HTMLButtonElement>(null);
+  const closeReferenceWindow = useCallback((id: string) => {
+    closeWindow(id);
+    window.requestAnimationFrame(() => {
+      const activeId = useWindowStore.getState().activeWindowId;
+      const pane = Array.from(document.querySelectorAll<HTMLElement>('[data-window-id]')).find(element => element.dataset.windowId === activeId);
+      pane?.querySelector<HTMLElement>('[role="region"]')?.focus();
+    });
+  }, [closeWindow]);
   const closeHeldPanel = () => { setShowHeldPages(false); heldToggleRef.current?.focus(); };
   useEffect(() => {
     if (showHeldPages) heldBackRef.current?.focus();
@@ -250,7 +258,7 @@ function App() {
         {(windowNotice || heldNotice) && <div role="status" className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-950"><span>{windowNotice || heldNotice}</span><button aria-label="关闭操作提示" className="p-2" onClick={() => { clearWindowNotice(); useHeldStore.getState().clearNotice(); }}><X size={16} /></button></div>}
         <main inert={busy} className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <section inert={showHeldPages} className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#edece9]">
-            {documentId ? <WorkspaceCanvas windows={windows} onWindowUpdate={(win) => { updateWindow(win.id, win); if (win.isActive) setActiveWindow(win.id); }} onWindowClose={closeWindow} /> : (
+            {documentId ? <WorkspaceCanvas windows={windows} onWindowUpdate={(win) => { updateWindow(win.id, win); if (win.isActive) setActiveWindow(win.id); }} onWindowClose={closeReferenceWindow} /> : (
               <div className="flex min-h-0 flex-1 overflow-y-auto bg-[var(--surface)] p-4 sm:p-8 lg:items-center lg:justify-center">
                 <div className="m-auto grid w-full max-w-[1080px] grid-cols-1 border border-[var(--border)] bg-[var(--surface)] shadow-[0_24px_70px_rgba(28,25,23,0.05)] md:grid-cols-[1.15fr_0.85fr]">
                   <div className="px-6 py-9 sm:px-10 sm:py-12 md:border-r md:border-[var(--border)]">

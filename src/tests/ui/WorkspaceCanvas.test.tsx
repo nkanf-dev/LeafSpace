@@ -88,13 +88,13 @@ describe('WorkspaceCanvas', () => {
   it('clamps split resizing and stops reacting after the mouse is released', () => {
     const { onWindowUpdate } = renderWorkspace([mainWindow, dockedWindow]);
     fireEvent.mouseDown(screen.getByRole('separator'), { clientX: 600 });
-    fireEvent.mouseMove(window, { clientX: 2000 });
+    fireEvent.mouseMove(window, { buttons: 1, clientX: 2000 });
     expect(onWindowUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ splitRatio: 0.8 }));
-    fireEvent.mouseMove(window, { clientX: -1000 });
+    fireEvent.mouseMove(window, { buttons: 1, clientX: -1000 });
     expect(onWindowUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ splitRatio: 0.35 }));
     fireEvent.mouseUp(window);
     onWindowUpdate.mockClear();
-    fireEvent.mouseMove(window, { clientX: 500 });
+    fireEvent.mouseMove(window, { buttons: 1, clientX: 500 });
     expect(onWindowUpdate).not.toHaveBeenCalled();
     expect(document.body).not.toHaveClass('is-panning');
   });
@@ -107,9 +107,9 @@ describe('WorkspaceCanvas', () => {
     vi.spyOn(floating, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 100, 420, 560));
     fireEvent.mouseDown(title, { clientX: 110, clientY: 110 });
     expect(onWindowUpdate).toHaveBeenCalledWith(expect.objectContaining({ id: 'reference', isActive: true, zIndex: 3 }));
-    fireEvent.mouseMove(window, { clientX: 2000, clientY: 2000 });
+    fireEvent.mouseMove(window, { buttons: 1, clientX: 2000, clientY: 2000 });
     expect(onWindowUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ x: 568, y: 228 }));
-    fireEvent.mouseMove(window, { clientX: -100, clientY: -100 });
+    fireEvent.mouseMove(window, { buttons: 1, clientX: -100, clientY: -100 });
     expect(onWindowUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ x: 12, y: 12 }));
     fireEvent.mouseUp(window);
   });
@@ -120,7 +120,42 @@ describe('WorkspaceCanvas', () => {
     expect(document.body).toHaveClass('is-panning');
     unmount();
     onWindowUpdate.mockClear();
-    fireEvent.mouseMove(window, { clientX: 300, clientY: 300 });
+    fireEvent.mouseMove(window, { buttons: 1, clientX: 300, clientY: 300 });
+    expect(onWindowUpdate).not.toHaveBeenCalled();
+    expect(document.body).not.toHaveClass('is-panning');
+  });
+
+  it.each(['drag', 'resize', 'split'] as const)('cancels %s on blur instead of moving when the pointer returns', (kind) => {
+    const { container, onWindowUpdate } = renderWorkspace([mainWindow, kind === 'split' ? dockedWindow : floatingWindow]);
+    const handle = kind === 'drag' ? screen.getByText('参考: P.8') : kind === 'split' ? screen.getByRole('separator') : container.querySelector('.cursor-nwse-resize')!;
+    fireEvent.mouseDown(handle, { button: 0, buttons: 1, clientX: 110, clientY: 110 });
+    expect(document.body).toHaveClass('is-panning');
+    fireEvent.blur(window);
+    onWindowUpdate.mockClear();
+    fireEvent.mouseMove(window, { buttons: 1, clientX: 400, clientY: 300 });
+    expect(onWindowUpdate).not.toHaveBeenCalled();
+    expect(document.body).not.toHaveClass('is-panning');
+  });
+
+  it.each(['escape', 'visibility', 'released-buttons'] as const)('cancels an interrupted drag on %s', (interruption) => {
+    const { onWindowUpdate } = renderWorkspace([mainWindow, floatingWindow]);
+    fireEvent.mouseDown(screen.getByText('参考: P.8'), { button: 0, buttons: 1, clientX: 110, clientY: 110 });
+    onWindowUpdate.mockClear();
+    if (interruption === 'escape') expect(fireEvent.keyDown(window, { key: 'Escape' })).toBe(false);
+    else if (interruption === 'visibility') {
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+      fireEvent(document, new Event('visibilitychange'));
+    } else fireEvent.mouseMove(window, { buttons: 0, clientX: 400, clientY: 300 });
+    fireEvent.mouseMove(window, { buttons: 1, clientX: 450, clientY: 350 });
+    expect(onWindowUpdate).not.toHaveBeenCalled();
+    expect(document.body).not.toHaveClass('is-panning');
+  });
+
+  it('does not transfer an in-flight split drag to a replacement reference', () => {
+    const { rerender, onWindowUpdate, onWindowClose } = renderWorkspace([mainWindow, dockedWindow]);
+    fireEvent.mouseDown(screen.getByRole('separator'), { button: 0, buttons: 1, clientX: 600 });
+    rerender(<WorkspaceCanvas windows={[mainWindow, { ...dockedWindow, id: 'replacement', splitRatio: 0.5 }]} onWindowUpdate={onWindowUpdate} onWindowClose={onWindowClose} />);
+    fireEvent.mouseMove(window, { buttons: 1, clientX: 650 });
     expect(onWindowUpdate).not.toHaveBeenCalled();
     expect(document.body).not.toHaveClass('is-panning');
   });

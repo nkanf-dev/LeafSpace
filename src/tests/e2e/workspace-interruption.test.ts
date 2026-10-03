@@ -1,0 +1,75 @@
+import { test, expect, importBook, reader, holdCurrentPage, navigateTo, expectMainPage } from './helpers';
+
+test.beforeEach(async ({ page }) => {
+  await page.goto('/');
+  await importBook(page);
+});
+
+for (const layout of ['floating', 'split', 'grid'] as const) {
+  test(`keyboard close in ${layout} layout returns to the surviving reader`, async ({ page }) => {
+    await holdCurrentPage(page, 1);
+    await page.getByRole('button', { name: '打开第 1 页参考窗口', exact: true }).click();
+    await expect(page.getByRole('region', { name: '参考阅读区，第 1 页', exact: true }).locator('canvas')).toBeVisible();
+    if (layout !== 'floating') await page.getByRole('combobox', { name: '工作区布局' }).selectOption(layout);
+    const close = page.getByRole('button', { name: '关闭', exact: true });
+    await close.focus();
+    await page.keyboard.press('Enter');
+    await expect(close).toHaveCount(0);
+    await expect(reader(page)).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expectMainPage(page, 2);
+  });
+}
+
+test('held-page removal cancels back to its opener, skips covered controls, and keeps a useful focus after deletion', async ({ page }) => {
+  await holdCurrentPage(page, 1);
+  await navigateTo(page, 2);
+  await holdCurrentPage(page, 2);
+  await page.getByRole('button', { name: '打开第 1 页参考窗口', exact: true }).click();
+  const remove = page.getByRole('button', { name: '移除第 1 页夹页', exact: true });
+  await remove.click();
+  await expect(page.getByRole('button', { name: '保留窗口', exact: true })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByRole('button', { name: '列表视图', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: '保留窗口', exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(remove).toBeFocused();
+  await expect(page.locator('[data-floating-window]')).toHaveCount(1);
+  await remove.click();
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await expect(remove).toBeFocused();
+  await remove.click();
+  await page.getByRole('button', { name: '保留窗口', exact: true }).click();
+  await expect(page.getByRole('button', { name: '阅读第 2 页', exact: true })).toBeFocused();
+  await page.getByRole('button', { name: '移除第 2 页夹页', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '夹住的页面 (0)', exact: true })).toBeFocused();
+  await expect(page.locator('[data-floating-window]')).toHaveCount(1);
+});
+
+for (const interruption of ['blur', 'Escape'] as const) {
+  test(`native window dragging stops on ${interruption} before another move or window-close action`, async ({ page }) => {
+    await holdCurrentPage(page, 1);
+    await page.getByRole('button', { name: '打开第 1 页参考窗口', exact: true }).click();
+    const floating = page.locator('[data-floating-window]');
+    const title = floating.getByText('参考: P.1', { exact: true });
+    await expect(floating.locator('canvas')).toBeVisible();
+    const handle = await title.boundingBox();
+    if (!handle) throw new Error('Missing floating window title');
+    await page.mouse.move(handle.x + 20, handle.y + 5);
+    await page.mouse.down();
+    await page.mouse.move(handle.x + 35, handle.y + 15);
+    await expect(page.locator('body')).toHaveClass(/is-panning/);
+    if (interruption === 'blur') await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+    else await page.keyboard.press('Escape');
+    await expect(page.locator('body')).not.toHaveClass(/is-panning/);
+    const settled = await floating.boundingBox();
+    await page.mouse.move(handle.x + 90, handle.y + 40);
+    await page.mouse.up();
+    await expect(floating).toHaveCount(1);
+    expect(await floating.boundingBox()).toEqual(settled);
+    await reader(page).focus();
+    await page.keyboard.press('Escape');
+    await expect(floating).toHaveCount(0);
+  });
+}

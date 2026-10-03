@@ -9,10 +9,17 @@ import { heldStore } from '../../stores/heldStore';
 import { quickFlipStore } from '../../stores/quickFlipStore';
 import { windowStore } from '../../stores/windowStore';
 import { configureWorkspaceStoreDependencies, resetWorkspaceStoreDependencies, workspaceStore } from '../../stores/workspaceStore';
+import type { ReaderWindow } from '../../types/domain';
 
 // App tests cover workflow sequencing. Rendering, pointer/keyboard behaviors and
 // debounce timing are exercised in the component/hook suites and browser tests.
-vi.mock('../../components/workspace/WorkspaceCanvas', () => ({ WorkspaceCanvas: () => <div role="region" aria-label="主阅读区" tabIndex={0}>阅读画布</div> }));
+vi.mock('../../components/workspace/WorkspaceCanvas', () => ({ WorkspaceCanvas: ({ windows, onWindowClose }: { windows: ReaderWindow[]; onWindowClose: (id: string) => void }) => <>
+  <div data-window-id="main"><div role="region" aria-label="主阅读区" tabIndex={0}>阅读画布</div></div>
+  {windows.filter(window => window.canClose).map(window => <div key={window.id} data-window-id={window.id}>
+    <button onClick={() => onWindowClose(window.id)}>关闭参考 {window.pageNumber}</button>
+    <div role="region" aria-label={`参考阅读区，第 ${window.pageNumber} 页`} tabIndex={0} />
+  </div>)}
+</> }));
 vi.mock('../../components/held-pages/HeldPagesPanel', () => ({ HeldPagesPanel: () => null }));
 vi.mock('../../components/quick-flip/QuickFlipOverlay', () => ({ QuickFlipOverlay: () => null }));
 vi.mock('../../components/timeline/TimelineBar', () => ({ TimelineBar: () => null }));
@@ -331,6 +338,19 @@ describe('App document workflows', () => {
     expect(windowStore.getState().windows).toHaveLength(1);
     expect(windowStore.getState().windows[0]).toMatchObject({ id: 'main', canClose: false });
     expect(useBookStore.getState().documentId).toBe('old-book');
+  });
+
+  it('returns focus to the surviving active reader after an explicit reference close', async () => {
+    setupDependencies();
+    openExistingBook();
+    const lower = windowStore.getState().openInNewWindow(5);
+    windowStore.getState().openInNewWindow(12);
+    windowStore.getState().setActiveWindow(lower);
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '关闭参考 12' })));
+    await waitFor(() => expect(screen.getByRole('region', { name: '参考阅读区，第 5 页' })).toHaveFocus());
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '关闭参考 5' })));
+    await waitFor(() => expect(screen.getByRole('region', { name: '主阅读区' })).toHaveFocus());
   });
 
   it('dismisses the held-pages overlay before closing a reference window', async () => {

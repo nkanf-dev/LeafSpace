@@ -16,6 +16,7 @@ Playwright builds the deployable bundle, then starts Vite preview on `127.0.0.1:
 - **Reader:** page bounds, keyboard/range navigation, accessible zoom and mode controls, native keyboard button activation
 - **Quick Flip:** selection without navigation, cancel/commit, repeat entry, held-arrow acceleration, Space autorepeat, focus containment/restore, holding and releasing preview pages
 - **Workspace:** duplicate hold prevention, reference window opening/closing, independent navigation, dock/swap/float, remove-and-close, single-click focused-reader navigation, double-click comparison, Escape stack priority
+- **Interrupted workspace input:** drag/resize/split cancellation unit contracts, native mouse drag followed by dispatched blur or keyboard Escape, reference-close focus across floating/split/grid layouts, and keyboard focus recovery after held-page cancellation/removal
 - **Completed reading flows:** 120-page nested outline, active-reference Quick Flip/TOC/timeline/page entry, 2–5-pane grids, repeated docking, capacity messages, reorder and explicit remove/close choices
 - **Rendered viewport:** independent main/reference scale and two-axis scroll restoration, repeated fit-width reset, Ctrl-wheel paper-point anchoring
 - **Large raster PDF:** generated 106 MB image-only document, first-render timing evidence, final-page navigation, held thumbnail and IndexedDB reopen
