@@ -192,6 +192,47 @@ for (const format of ['bytes', 'blob'] as const) {
   });
 }
 
+async function installCanvasProbe(page: Page) {
+  await page.addInitScript(() => {
+    const events: unknown[] = [];
+    Object.assign(window, { leafspaceCanvasEvents: events });
+    const ids = new WeakMap<HTMLCanvasElement, number>();
+    const contexts = new WeakMap<HTMLCanvasElement, CanvasRenderingContext2D>();
+    let nextId = 0;
+    const record = (canvas: HTMLCanvasElement, op: string, args: unknown[], context?: CanvasRenderingContext2D) => {
+      if (events.length > 5000) return;
+      if (!ids.has(canvas)) ids.set(canvas, ++nextId);
+      const matrix = context?.getTransform();
+      events.push({ at: performance.now(), id: ids.get(canvas), op, args, width: canvas.width, height: canvas.height,
+        page: canvas.closest('.react-pdf__Page')?.getAttribute('data-page-number'), connected: canvas.isConnected,
+        visibility: canvas.style.visibility, stack: /^(width|height|transform):before$/.test(op) ? new Error().stack?.split('\n').slice(1, 7) : undefined, matrix: matrix ? [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f] : null });
+    };
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', { configurable: true, writable: true, value: function (this: HTMLCanvasElement, ...args: unknown[]) {
+      const result = Reflect.apply(getContext, this, args);
+      if (args[0] === '2d' && result) { contexts.set(this, result); record(this, 'getContext', args, result); }
+      return result;
+    } });
+    for (const dimension of ['width', 'height'] as const) {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, dimension)!;
+      Object.defineProperty(HTMLCanvasElement.prototype, dimension, { ...descriptor, set: function (this: HTMLCanvasElement, value: number) {
+        record(this, `${dimension}:before`, [value], contexts.get(this));
+        descriptor.set!.call(this, value);
+        record(this, `${dimension}:after`, [value], contexts.get(this));
+      } });
+    }
+    for (const operation of ['save', 'restore', 'transform', 'setTransform', 'resetTransform', 'scale', 'translate', 'fillRect', 'fillText', 'rect', 'fill'] as const) {
+      const original = CanvasRenderingContext2D.prototype[operation];
+      Object.defineProperty(CanvasRenderingContext2D.prototype, operation, { configurable: true, writable: true, value: function (this: CanvasRenderingContext2D, ...args: unknown[]) {
+        record(this.canvas, `${operation}:before`, args, this);
+        const result = Reflect.apply(original, this, args);
+        record(this.canvas, `${operation}:after`, args, this);
+        return result;
+      } });
+    }
+  });
+}
+
 // A visible canvas alone does not establish that decoded page pixels are sound.
 // This fixture has a green rectangle at PDF (40,100)-(215,300) on page seven.
 async function fixturePixels(page: Page) {
@@ -207,7 +248,7 @@ async function fixturePixels(page: Page) {
 for (const failure of ['schema', 'metadata'] as const) {
   test(`an intact legacy PDF remains readable during ${failure} failure and saving recovers after retry`, async ({ page }, info) => {
     await seedLegacyBook(page, 'bytes');
-    await installStorageProbe(page, failure); await page.reload();
+    await installStorageProbe(page, failure); await installCanvasProbe(page); await page.reload();
     await page.getByRole('button', { name: new RegExp(BOOK_NAME) }).click();
     await expectMainPage(page, 7);
     await expect(reader(page).locator('canvas')).toBeVisible();
@@ -225,6 +266,7 @@ for (const failure of ['schema', 'metadata'] as const) {
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const settledPixels = await fixturePixels(page);
     await info.attach(`${failure}-settled-decoded-pixels`, { body: JSON.stringify(settledPixels), contentType: 'application/json' });
+    await info.attach('native-canvas-events', { body: JSON.stringify(await page.evaluate(() => (window as unknown as { leafspaceCanvasEvents: unknown[] }).leafspaceCanvasEvents)), contentType: 'application/json' });
     expect(settledPixels.background).toEqual([240, 237, 224, 255]);
     expect(settledPixels.rectangle).toEqual([51, 128, 76, 255]);
     await info.attach(`${failure}-failure-readable`, { body: await page.screenshot(), contentType: 'image/png' });
