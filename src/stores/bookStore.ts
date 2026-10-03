@@ -45,6 +45,7 @@ export interface DocumentReadyPayload {
 }
 
 export interface BookStoreState {
+  sessionId: number;
   currentPage: number;
   documentId: string | null;
   documentName: string | null;
@@ -74,6 +75,7 @@ const emptyDocument = {
 
 export const useBookStore = create<BookStoreState>((set, get) => ({
   ...emptyDocument,
+  sessionId: loadGeneration,
   status: 'idle',
 
   clearError: () => set({ error: null, status: get().documentId ? 'ready' : 'idle' }),
@@ -82,7 +84,7 @@ export const useBookStore = create<BookStoreState>((set, get) => ({
     void dependencies.pdfService.destroy();
     dependencies.thumbnailService.releaseDocument();
     releaseDocumentUrl(get().documentUrl);
-    set({ ...emptyDocument, status: 'loading' });
+    set({ ...emptyDocument, sessionId: loadGeneration, status: 'loading' });
   },
 
   loadDocument: async (file) => {
@@ -115,6 +117,7 @@ export const useBookStore = create<BookStoreState>((set, get) => ({
     if (source) dependencies.thumbnailService.activateDocument({ documentId: payload.documentId, totalPages, source });
     else dependencies.thumbnailService.releaseDocument();
     set({
+      sessionId: loadGeneration,
       documentId: payload.documentId,
       documentName: payload.documentName ?? null,
       documentUrl,
@@ -141,7 +144,7 @@ export const useBookStore = create<BookStoreState>((set, get) => ({
     void dependencies.pdfService.destroy();
     dependencies.thumbnailService.releaseDocument();
     releaseDocumentUrl(get().documentUrl);
-    set({ ...emptyDocument, status: 'idle' });
+    set({ ...emptyDocument, sessionId: loadGeneration, status: 'idle' });
   },
 }));
 

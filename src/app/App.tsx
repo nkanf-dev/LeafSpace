@@ -9,6 +9,7 @@ import { useHeldStore } from '../stores/heldStore';
 import { useWindowStore } from '../stores/windowStore';
 import { useQuickFlipStore } from '../stores/quickFlipStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
+import { useUnsavedExitGuard } from '../hooks/useUnsavedExitGuard';
 import { useWorkspaceAutoSave } from '../hooks/useWorkspaceAutoSave';
 import { PDFPasswordRequiredError } from '../services/PDFService';
 import { prepareHeldRead } from '../services/HeldReadTransaction';
@@ -131,6 +132,8 @@ function App() {
 
   useEffect(() => { void hydrateRecentBooks(); }, [hydrateRecentBooks]);
 
+  useUnsavedExitGuard();
+
   useWorkspaceAutoSave({ documentId, currentPage, scale, heldPages, windows, activeWindowId,
     enabled: ready && workspaceStatus === 'idle', saveWorkspace });
 
@@ -241,7 +244,7 @@ function App() {
         </div>}
 
         {error && error !== dismissedError && <div role="alert" className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          <span className="min-w-0 flex-1">{workflowError || (workspace.errorOperation === 'register' ? 'PDF 尚未保存到本机，请保留原文件。可以继续阅读，重试保存成功后再切换书籍或回到书库。' : workspace.error ? `本机存储遇到问题：${workspace.error}` : '文件加载失败，请检查 PDF 后重新导入。')}</span>
+          <span className="min-w-0 flex-1">{workflowError || (workspace.errorOperation === 'register' ? 'PDF 尚未保存到本机，请保留原文件。可以继续阅读，但刷新或关闭页面可能丢失未保存的现场；请先重试保存。' : workspace.error ? `本机存储遇到问题：${workspace.error}` : '文件加载失败，请检查 PDF 后重新导入。')}</span>
           {workspace.error && workspace.errorOperation !== 'open' && <button className="underline underline-offset-4" onClick={retryStorage} disabled={busy || workspaceStatus === 'saving'}>{workspace.errorOperation === 'restore' ? '重试恢复' : workspace.errorOperation === 'recent' ? '重试读取' : '重试保存'}</button>}
           <button className="underline underline-offset-4" onClick={() => fileInputRef.current?.click()} disabled={busy}>重新导入</button>
           <button aria-label="关闭提示" className="p-2" onClick={() => setDismissedError(error)}><X size={18} /></button>

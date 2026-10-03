@@ -56,6 +56,12 @@ function openExistingBook() {
   });
 }
 
+function beforeUnloadIsBlocked() {
+  const event = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+
 describe('App document workflows', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -71,6 +77,93 @@ describe('App document workflows', () => {
     vi.restoreAllMocks();
     resetBookStoreDependencies();
     resetWorkspaceStoreDependencies();
+  });
+
+  it('warns immediately about unsaved reading changes and stops after they are saved', async () => {
+    setupDependencies(); openExistingBook();
+    await workspaceStore.getState().restoreWorkspace('old-book');
+    await workspaceStore.getState().saveWorkspace('old-book');
+    render(<App />);
+    expect(beforeUnloadIsBlocked()).toBe(false);
+    act(() => useBookStore.getState().setCurrentPage(9));
+    expect(beforeUnloadIsBlocked()).toBe(true);
+    await act(async () => { await workspaceStore.getState().saveWorkspace('old-book'); });
+    expect(beforeUnloadIsBlocked()).toBe(false);
+  });
+
+  it('retains the exit warning when a failed PDF alert is dismissed without retrying storage', async () => {
+    const { register, save } = setupDependencies();
+    register.mockRejectedValue(new DOMException('Synthetic quota', 'QuotaExceededError'));
+    openExistingBook();
+    await workspaceStore.getState().registerCurrentBook(new File(['%PDF'], 'Unsaved.pdf', { type: 'application/pdf' }));
+    await act(async () => { render(<App />); });
+    fireEvent.click(screen.getByRole('button', { name: '关闭提示' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(beforeUnloadIsBlocked()).toBe(true);
+    expect(register).toHaveBeenCalledOnce();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('warns while an asynchronous save is unconfirmed without starting another write', async () => {
+    const { save } = setupDependencies(); openExistingBook();
+    await workspaceStore.getState().restoreWorkspace('old-book');
+    let finish!: () => void;
+    save.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    render(<App />);
+    let pending!: Promise<void>;
+    await act(async () => { pending = workspaceStore.getState().saveWorkspace('old-book'); });
+    try {
+      expect(beforeUnloadIsBlocked()).toBe(true);
+      expect(save).toHaveBeenCalledOnce();
+    } finally {
+      await act(async () => { finish(); await pending; });
+    }
+    expect(beforeUnloadIsBlocked()).toBe(false);
+  });
+
+  it('does not warn for untouched failed restoration but preserves later edits across failed retries', async () => {
+    const { restore } = setupDependencies();
+    restore.mockRejectedValueOnce(new Error('Unread snapshot')).mockRejectedValueOnce(new Error('Still unread'));
+    render(<App />);
+    await act(async () => { selectFile(); });
+    expect(workspaceStore.getState().errorOperation).toBe('restore');
+    expect(beforeUnloadIsBlocked()).toBe(false);
+    act(() => useBookStore.getState().setCurrentPage(3));
+    expect(beforeUnloadIsBlocked()).toBe(true);
+    await act(async () => { await workspaceStore.getState().restoreWorkspace('new-book'); });
+    expect(beforeUnloadIsBlocked()).toBe(true);
+    restore.mockResolvedValueOnce({ documentId: 'new-book', currentPage: 5, scale: 1, activeWindowId: 'main',
+      layoutPreset: 'single', heldPages: [], windows: windowStore.getState().windows, savedAt: '2026-01-01T00:00:00.000Z' });
+    await act(async () => { await workspaceStore.getState().restoreWorkspace('new-book'); });
+    expect(useBookStore.getState().currentPage).toBe(5);
+    expect(beforeUnloadIsBlocked()).toBe(false);
+  });
+
+  it('does not treat a successful empty restore retry as confirmation that new reading changes are saved', async () => {
+    const { restore } = setupDependencies();
+    restore.mockRejectedValueOnce(new Error('Unread snapshot')).mockResolvedValueOnce(null);
+    render(<App />);
+    await act(async () => { selectFile(); });
+    expect(beforeUnloadIsBlocked()).toBe(false);
+    act(() => useBookStore.getState().setCurrentPage(9));
+    await act(async () => { await workspaceStore.getState().restoreWorkspace('new-book'); });
+    expect(useBookStore.getState().currentPage).toBe(9);
+    expect(beforeUnloadIsBlocked()).toBe(true);
+    await act(async () => { await workspaceStore.getState().saveWorkspace('new-book'); });
+    expect(beforeUnloadIsBlocked()).toBe(false);
+  });
+
+  it('establishes the first exit baseline after cleanup of a partially applied restore failure', async () => {
+    const { restore } = setupDependencies();
+    restore.mockResolvedValueOnce({ documentId: 'new-book', currentPage: 5, scale: 1.5, activeWindowId: 'main',
+      layoutPreset: 'single', heldPages: [null] as unknown as ReturnType<typeof heldStore.getState>['pages'], windows: [], savedAt: '2026-01-01T00:00:00.000Z' });
+    render(<App />);
+    await act(async () => { selectFile(); });
+    expect(workspaceStore.getState().errorOperation).toBe('restore');
+    expect(useBookStore.getState().currentPage).toBe(5);
+    expect(beforeUnloadIsBlocked()).toBe(false);
+    act(() => useBookStore.getState().setCurrentPage(6));
+    expect(beforeUnloadIsBlocked()).toBe(true);
   });
 
   it('rejects an unsupported file before changing the current reader', async () => {
