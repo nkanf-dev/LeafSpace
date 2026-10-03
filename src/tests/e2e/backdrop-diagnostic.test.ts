@@ -17,7 +17,7 @@ test('compares Quick Flip legibility with and without native backdrop filters', 
     }
     await expect(selected).toHaveAttribute('aria-pressed', 'true');
     const backdrop = overlay.locator(':scope > div').first();
-    const style = await page.addStyleTag({ content: '' });
+    const style = await page.addStyleTag({ content: '/* backdrop comparison */' });
     for (const filter of ['native', 'none']) {
       for (const alpha of [0.7, 0.92]) {
         await style.evaluate((element, { filter, alpha }) => {
