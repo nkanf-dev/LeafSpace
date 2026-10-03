@@ -14,7 +14,7 @@ let dependencies: WorkspaceStoreDependencies = { ...defaultDependencies };
 let operationGeneration = 0;
 let saveQueue: Promise<void> = Promise.resolve();
 type BookAssetInput = Parameters<typeof persistenceService.saveBookAsset>[0];
-interface PendingBookAsset { input: BookAssetInput; saved: boolean }
+interface PendingBookAsset { input: BookAssetInput; saved: boolean; sessionId: number }
 // Keep the source until its own write succeeds. A small workspace snapshot can
 // fit when a PDF cannot, so snapshot success alone must never imply durability.
 let pendingBookAsset: PendingBookAsset | null = null;
@@ -24,13 +24,45 @@ async function persistBookAsset(asset: PendingBookAsset, persistence: typeof per
     await persistence.saveBookAsset(asset.input);
     asset.saved = true;
   }
-  if (pendingBookAsset === asset) pendingBookAsset = null;
+  if (pendingBookAsset === asset) {
+    pendingBookAsset = null;
+    // Asset identity, not request generation, owns this completion: a newer
+    // snapshot may already be waiting for this exact source write to finish.
+    const pending = useWorkspaceStore.getState().pendingPdf;
+    if (pending?.documentId === asset.input.documentId && pending.sessionId === asset.sessionId) {
+      useWorkspaceStore.setState({ pendingPdf: null });
+    }
+  }
+}
+
+interface ExitSessionOwner { documentId: string; sessionId: number }
+interface ExitBaseline extends ExitSessionOwner { signature: string }
+type ReadingState = Pick<WorkspaceSnapshot, 'currentPage' | 'scale' | 'heldPages' | 'windows' | 'activeWindowId'>;
+
+function readingSignature(state: ReadingState): string {
+  return JSON.stringify([state.currentPage, state.scale, state.heldPages, state.windows, state.activeWindowId]);
+}
+function liveReadingState(): ReadingState {
+  return { currentPage: bookStore.getState().currentPage, scale: bookStore.getState().scale,
+    heldPages: heldStore.getState().pages, windows: windowStore.getState().windows,
+    activeWindowId: windowStore.getState().activeWindowId };
+}
+function activeSession(owner: ExitSessionOwner): boolean {
+  const book = bookStore.getState();
+  return book.status === 'ready' && book.documentId === owner.documentId && book.sessionId === owner.sessionId;
+}
+function exitBaseline(owner: ExitSessionOwner, reading = liveReadingState()): ExitBaseline {
+  // An immutable projection, independent of the saved/error UI and savedAt.
+  return { ...owner, signature: readingSignature(reading) };
 }
 
 export type WorkspaceStatus = 'idle' | 'saving' | 'restoring' | 'error';
 export type WorkspaceErrorOperation = 'recent' | 'open' | 'register' | 'save' | 'restore';
 
 export interface WorkspaceStoreState {
+  exitBaseline: ExitBaseline | null;
+  unconfirmedSave: (ExitSessionOwner & { requestId: number }) | null;
+  pendingPdf: ExitSessionOwner | null;
   currentSnapshot: WorkspaceSnapshot | null;
   recentBooks: RecentBookEntry[];
   status: WorkspaceStatus;
@@ -58,6 +90,9 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
+  exitBaseline: null,
+  unconfirmedSave: null,
+  pendingPdf: null,
   currentSnapshot: null,
   recentBooks: [],
   status: 'idle',
@@ -113,8 +148,9 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     const generation = operationGeneration;
     const asset: PendingBookAsset = { input: {
       documentId, file, fileName: file.name, fileSize: file.size, totalPages: bookState.totalPages,
-    }, saved: false };
+    }, saved: false, sessionId: bookState.sessionId };
     pendingBookAsset = asset;
+    set({ pendingPdf: { documentId, sessionId: asset.sessionId } });
     const persistence = dependencies.persistenceService;
     const registration = saveQueue.then(() => persistBookAsset(asset, persistence));
     saveQueue = registration.catch(() => undefined);
@@ -138,6 +174,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
       return;
     }
     const generation = ++operationGeneration;
+    const owner = { documentId: docId, sessionId: bookState.sessionId };
     const snapshot: WorkspaceSnapshot = {
       documentId: docId,
       currentPage: bookState.currentPage,
@@ -151,12 +188,18 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     const persistence = dependencies.persistenceService;
     const asset = pendingBookAsset?.input.documentId === docId ? pendingBookAsset : null;
     let errorOperation: WorkspaceErrorOperation = asset ? 'register' : 'save';
-    set({ status: 'saving', error: null, errorOperation: null });
+    set({ status: 'saving', error: null, errorOperation: null, unconfirmedSave: { ...owner, requestId: generation } });
     // Serialize writes so a slower earlier save cannot overwrite a newer snapshot.
     const pendingSave = saveQueue.then(async () => {
       if (asset) await persistBookAsset(asset, persistence);
       errorOperation = 'save';
       await persistence.saveWorkspace(snapshot);
+      if (activeSession(owner)) {
+        // Every successful serialized write changes what is durable, even when
+        // a later request owns the status UI. Never bless newer live edits here.
+        set({ exitBaseline: exitBaseline(owner, snapshot),
+          ...(get().unconfirmedSave?.requestId === generation ? { unconfirmedSave: null } : {}) });
+      }
     });
     saveQueue = pendingSave.catch(() => undefined);
     try {
@@ -174,6 +217,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   restoreWorkspace: async (docId) => {
     if (bookStore.getState().documentId !== docId || bookStore.getState().status !== 'ready') return;
     const generation = ++operationGeneration;
+    const owner = { documentId: docId, sessionId: bookStore.getState().sessionId };
     set({ status: 'restoring', currentSnapshot: null, error: null, errorOperation: null, unrestoredDocumentId: docId });
     // Never display one book's held pages or windows on another PDF, including
     // while IndexedDB is unavailable or its snapshot is malformed.
@@ -192,13 +236,24 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
         heldStore.getState().restorePages(snapshot.heldPages);
         windowStore.getState().restoreWindows(snapshot.windows, snapshot.activeWindowId);
       }
-      set({ currentSnapshot: snapshot, status: 'idle', error: null, errorOperation: null, unrestoredDocumentId: null });
+      // A null read confirms absence, not durability of edits made since an
+      // earlier failed attempt. Only an applied snapshot may replace that baseline.
+      const baseline = get().exitBaseline;
+      const initial = !baseline || baseline.sessionId !== owner.sessionId || baseline.documentId !== docId;
+      set({ currentSnapshot: snapshot, status: 'idle', error: null, errorOperation: null, unrestoredDocumentId: null,
+        ...(activeSession(owner) && (snapshot || initial) ? { exitBaseline: exitBaseline(owner) } : {}),
+        ...(activeSession(owner) && snapshot ? { unconfirmedSave: null } : {}) });
       await get().hydrateRecentBooks();
     } catch (error) {
       if (generation === operationGeneration && bookStore.getState().documentId === docId) {
         heldStore.getState().reset();
         windowStore.getState().reset();
-        set({ error: errorMessage(error, '恢复现场失败，可重试或继续阅读'), errorOperation: 'restore', status: 'error' });
+        const baseline = get().exitBaseline;
+        const initial = !baseline || baseline.sessionId !== owner.sessionId || baseline.documentId !== docId;
+        // Establish the initial comparison after cleanup, including a restore
+        // that partially applied page/scale before malformed saved data failed.
+        set({ error: errorMessage(error, '恢复现场失败，可重试或继续阅读'), errorOperation: 'restore', status: 'error',
+          ...(activeSession(owner) && initial ? { exitBaseline: exitBaseline(owner) } : {}) });
       }
     }
   },
@@ -206,7 +261,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   reset: () => {
     operationGeneration += 1;
     pendingBookAsset = null;
-    set({ currentSnapshot: null, recentBooks: [], status: 'idle', error: null, errorOperation: null, unrestoredDocumentId: null });
+    set({ exitBaseline: null, unconfirmedSave: null, pendingPdf: null, currentSnapshot: null, recentBooks: [], status: 'idle', error: null, errorOperation: null, unrestoredDocumentId: null });
   },
 }));
 
@@ -215,3 +270,17 @@ export const configureWorkspaceStoreDependencies = (overrides: Partial<Workspace
 };
 export const resetWorkspaceStoreDependencies = () => { dependencies = { ...defaultDependencies }; };
 export const workspaceStore = useWorkspaceStore;
+
+// Session changes retire only guard metadata. Existing queued I/O and source
+// lifecycle retain their own ownership rules; this does not cancel disk writes.
+bookStore.subscribe((book, previous) => {
+  if (book.sessionId !== previous.sessionId) useWorkspaceStore.setState({ exitBaseline: null, unconfirmedSave: null, pendingPdf: null });
+});
+
+export function hasUnsavedWorkspace(): boolean {
+  const book = bookStore.getState();
+  if (book.status !== 'ready' || !book.documentId) return false;
+  const state = useWorkspaceStore.getState();
+  if ((state.pendingPdf && activeSession(state.pendingPdf)) || (state.unconfirmedSave && activeSession(state.unconfirmedSave))) return true;
+  return !!state.exitBaseline && activeSession(state.exitBaseline) && state.exitBaseline.signature !== readingSignature(liveReadingState());
+}
