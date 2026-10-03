@@ -17,13 +17,16 @@ test('compares Quick Flip legibility with and without native backdrop filters', 
     }
     await expect(selected).toHaveAttribute('aria-pressed', 'true');
     const backdrop = overlay.locator(':scope > div').first();
+    const style = await page.addStyleTag({ content: '' });
     for (const filter of ['native', 'none']) {
-      await backdrop.evaluate((element, filter) => {
-        (element as HTMLElement).style.setProperty('backdrop-filter', filter === 'none' ? 'none' : 'blur(40px)');
-        (element as HTMLElement).style.setProperty('-webkit-backdrop-filter', filter === 'none' ? 'none' : 'blur(40px)');
-      }, filter);
       for (const alpha of [0.7, 0.92]) {
-        await backdrop.evaluate((element, alpha) => { (element as HTMLElement).style.backgroundColor = `rgba(251, 250, 248, ${alpha})`; }, alpha);
+        await style.evaluate((element, { filter, alpha }) => {
+          const blur = filter === 'none' ? 'none' : 'blur(40px)';
+          element.textContent = `[aria-label="速翻视图"] > div:first-child { background-color: rgba(251, 250, 248, ${alpha}) !important; backdrop-filter: ${blur} !important; -webkit-backdrop-filter: ${blur} !important; transition: none !important; }`;
+        }, { filter, alpha });
+        await expect(backdrop).toHaveCSS('background-color', `rgba(251, 250, 248, ${alpha})`);
+        await expect(backdrop).toHaveCSS('backdrop-filter', filter === 'none' ? 'none' : 'blur(40px)');
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
         await info.attach(`backdrop-${width}-${filter}-${alpha}`, { body: await page.screenshot(), contentType: 'image/png' });
         await info.attach(`style-${width}-${filter}-${alpha}`, { body: JSON.stringify(await backdrop.evaluate(element => ({ background: getComputedStyle(element).backgroundColor, filter: getComputedStyle(element).backdropFilter }))), contentType: 'application/json' });
       }
@@ -44,5 +47,6 @@ test('compares Quick Flip legibility with and without native backdrop filters', 
       expect(await page.locator('.quick-flip-strip').evaluate(element => element.scrollLeft)).toBe(scroll);
     }
     await page.keyboard.press('Escape'); await expect(overlay).toHaveCount(0);
+    await style.evaluate(element => element.parentNode?.removeChild(element));
   }
 });
