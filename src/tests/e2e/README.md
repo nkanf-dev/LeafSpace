@@ -14,6 +14,7 @@ Playwright builds the deployable bundle, then starts Vite preview on `127.0.0.1:
 
 - **Shell/import/recovery:** empty library, real PDF.js text/canvas rendering, malformed and empty PDF recovery
 - **Reader:** page bounds, keyboard/range navigation, accessible zoom and mode controls, native keyboard button activation
+- **Mouse pan:** rapid native movement retains the latest target across saved intermediate scroll frames, settles at measured bounds, and is repeated five times without retries in WebKit. Deterministic UI tests also cover release-time settling, authoritative external restoration during pending paint, clamped targets and integer-rounded offsets
 - **Quick Flip:** selection without navigation, cancel/commit, repeat entry, held-arrow acceleration, Space autorepeat, focus containment/restore, holding and releasing preview pages
 - **Workspace:** duplicate hold prevention, reference window opening/closing, independent navigation, dock/swap/float, remove-and-close, single-click focused-reader navigation, double-click comparison, Escape stack priority
 - **Interrupted workspace input:** drag/resize/split cancellation unit contracts, native mouse drag followed by dispatched blur or keyboard Escape, reference-close focus across floating/split/grid layouts, and keyboard focus recovery after held-page cancellation/removal
