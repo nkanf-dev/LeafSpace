@@ -13,6 +13,19 @@ const defaultDependencies: WorkspaceStoreDependencies = { persistenceService };
 let dependencies: WorkspaceStoreDependencies = { ...defaultDependencies };
 let operationGeneration = 0;
 let saveQueue: Promise<void> = Promise.resolve();
+type BookAssetInput = Parameters<typeof persistenceService.saveBookAsset>[0];
+interface PendingBookAsset { input: BookAssetInput; saved: boolean }
+// Keep the source until its own write succeeds. A small workspace snapshot can
+// fit when a PDF cannot, so snapshot success alone must never imply durability.
+let pendingBookAsset: PendingBookAsset | null = null;
+
+async function persistBookAsset(asset: PendingBookAsset, persistence: typeof persistenceService) {
+  if (!asset.saved) {
+    await persistence.saveBookAsset(asset.input);
+    asset.saved = true;
+  }
+  if (pendingBookAsset === asset) pendingBookAsset = null;
+}
 
 export type WorkspaceStatus = 'idle' | 'saving' | 'restoring' | 'error';
 export type WorkspaceErrorOperation = 'recent' | 'open' | 'register' | 'save' | 'restore';
@@ -23,11 +36,12 @@ export interface WorkspaceStoreState {
   status: WorkspaceStatus;
   error: string | null;
   errorOperation: WorkspaceErrorOperation | null;
+  unrestoredDocumentId: string | null;
   clearError: () => void;
   hydrateRecentBooks: () => Promise<void>;
   openRecentBook: (documentId: string) => Promise<void>;
   registerCurrentBook: (file: File) => Promise<void>;
-  saveWorkspace: (docId: string) => Promise<void>;
+  saveWorkspace: (docId: string, options?: { replaceUnrestored?: boolean }) => Promise<void>;
   reset: () => void;
   restoreWorkspace: (docId: string) => Promise<void>;
 }
@@ -49,6 +63,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   status: 'idle',
   error: null,
   errorOperation: null,
+  unrestoredDocumentId: null,
 
   clearError: () => set({ error: null, errorOperation: null, status: 'idle' }),
 
@@ -96,10 +111,15 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     if (!bookState.documentId || bookState.status !== 'ready') return;
     const documentId = bookState.documentId;
     const generation = operationGeneration;
+    const asset: PendingBookAsset = { input: {
+      documentId, file, fileName: file.name, fileSize: file.size, totalPages: bookState.totalPages,
+    }, saved: false };
+    pendingBookAsset = asset;
+    const persistence = dependencies.persistenceService;
+    const registration = saveQueue.then(() => persistBookAsset(asset, persistence));
+    saveQueue = registration.catch(() => undefined);
     try {
-      await dependencies.persistenceService.saveBookAsset({
-        documentId, file, fileName: file.name, fileSize: file.size, totalPages: bookState.totalPages,
-      });
+      await registration;
       if (generation !== operationGeneration || bookStore.getState().documentId !== documentId) return;
       if (get().errorOperation === 'register') set({ error: null, errorOperation: null, status: 'idle' });
       await get().hydrateRecentBooks();
@@ -110,9 +130,13 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
     }
   },
 
-  saveWorkspace: async (docId) => {
+  saveWorkspace: async (docId, options) => {
     const bookState = bookStore.getState();
     if (bookState.documentId !== docId || bookState.status !== 'ready' || get().status === 'restoring') return;
+    if (get().unrestoredDocumentId === docId && !options?.replaceUnrestored) {
+      set({ status: 'error', errorOperation: 'restore', error: '上次阅读现场尚未恢复，已暂停保存和切换。请先重试恢复，或点击「保存现场」确认替换。' });
+      return;
+    }
     const generation = ++operationGeneration;
     const snapshot: WorkspaceSnapshot = {
       documentId: docId,
@@ -125,18 +149,24 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
       savedAt: new Date().toISOString(),
     };
     const persistence = dependencies.persistenceService;
+    const asset = pendingBookAsset?.input.documentId === docId ? pendingBookAsset : null;
+    let errorOperation: WorkspaceErrorOperation = asset ? 'register' : 'save';
     set({ status: 'saving', error: null, errorOperation: null });
     // Serialize writes so a slower earlier save cannot overwrite a newer snapshot.
-    const pendingSave = saveQueue.then(() => persistence.saveWorkspace(snapshot));
+    const pendingSave = saveQueue.then(async () => {
+      if (asset) await persistBookAsset(asset, persistence);
+      errorOperation = 'save';
+      await persistence.saveWorkspace(snapshot);
+    });
     saveQueue = pendingSave.catch(() => undefined);
     try {
       await pendingSave;
       if (generation !== operationGeneration || bookStore.getState().documentId !== docId) return;
-      set({ currentSnapshot: snapshot, status: 'idle' });
+      set({ currentSnapshot: snapshot, status: 'idle', error: null, errorOperation: null, unrestoredDocumentId: null });
       await get().hydrateRecentBooks();
     } catch (error) {
       if (generation === operationGeneration && bookStore.getState().documentId === docId) {
-        set({ error: errorMessage(error, '保存现场失败，请检查浏览器存储后重试'), errorOperation: 'save', status: 'error' });
+        set({ error: errorMessage(error, '保存到本机失败，请检查浏览器存储后重试'), errorOperation, status: 'error' });
       }
     }
   },
@@ -144,7 +174,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
   restoreWorkspace: async (docId) => {
     if (bookStore.getState().documentId !== docId || bookStore.getState().status !== 'ready') return;
     const generation = ++operationGeneration;
-    set({ status: 'restoring', currentSnapshot: null, error: null, errorOperation: null });
+    set({ status: 'restoring', currentSnapshot: null, error: null, errorOperation: null, unrestoredDocumentId: docId });
     // Never display one book's held pages or windows on another PDF, including
     // while IndexedDB is unavailable or its snapshot is malformed.
     heldStore.getState().reset();
@@ -162,7 +192,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
         heldStore.getState().restorePages(snapshot.heldPages);
         windowStore.getState().restoreWindows(snapshot.windows, snapshot.activeWindowId);
       }
-      set({ currentSnapshot: snapshot, status: 'idle', error: null, errorOperation: null });
+      set({ currentSnapshot: snapshot, status: 'idle', error: null, errorOperation: null, unrestoredDocumentId: null });
       await get().hydrateRecentBooks();
     } catch (error) {
       if (generation === operationGeneration && bookStore.getState().documentId === docId) {
@@ -175,7 +205,8 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set, get) => ({
 
   reset: () => {
     operationGeneration += 1;
-    set({ currentSnapshot: null, recentBooks: [], status: 'idle', error: null, errorOperation: null });
+    pendingBookAsset = null;
+    set({ currentSnapshot: null, recentBooks: [], status: 'idle', error: null, errorOperation: null, unrestoredDocumentId: null });
   },
 }));
 

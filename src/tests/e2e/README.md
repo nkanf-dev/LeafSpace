@@ -20,9 +20,12 @@ Playwright builds the deployable bundle, then starts Vite preview on `127.0.0.1:
 - **Rendered viewport:** independent main/reference scale and two-axis scroll restoration, repeated fit-width reset, Ctrl-wheel paper-point anchoring
 - **Large raster PDF:** generated 106 MB image-only document, first-render timing evidence, final-page navigation, held thumbnail and IndexedDB reopen
 - **Persistence:** manual and debounced saves, idle-save-loop regression, reload/recent restoration, two-document isolation, failed replacement recovery, immediate library and document-switch flushing, malformed/partial saved-state recovery, missing recent-file recovery
+- **Storage faults:** a failed PDF asset write cannot be masked by saving a small snapshot; retries preserve the original file and latest reading position. A failed snapshot read blocks implicit overwrite during library/import navigation, with keyboard-cancellable explicit replacement
 - **Responsive:** full touch-accessible workflow at desktop 1440×900, tablet 768×1024, and mobile 390×844, including horizontal overflow and in-viewport action checks
 
 Every test gets an isolated browser context and real IndexedDB. Fixture imports use the real file input; tests do not inject application stores. IndexedDB is read for durable-save checkpoints. Three recovery tests deliberately replace or delete only their isolated synthetic-book records to simulate malformed snapshots, partial legacy data, and a missing local file. The single deliberate 1.5-second idle wait checks three autosave debounce periods for an unwanted write loop.
+
+Storage-recovery tests inject a `QuotaExceededError` for PDF-asset writes or an `UnknownError` for workspace reads at the IndexedDB operation boundary, then restore the operation and verify recovery through real controls. This tests application error handling, not physical disk exhaustion or a browser's eviction policy.
 
 Native reverse/forward Tab traversal and visible focus are asserted on all three engines. A standalone WebKit SVG hit-target probe documents the browser's clicked-descendant behavior; decorative SVGs are non-interactive so button clicks preserve normal keyboard navigation.
 

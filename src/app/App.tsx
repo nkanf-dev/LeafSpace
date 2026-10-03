@@ -11,6 +11,15 @@ import { useQuickFlipStore } from '../stores/quickFlipStore';
 import { useWorkspaceStore } from '../stores/workspaceStore';
 import { useWorkspaceAutoSave } from '../hooks/useWorkspaceAutoSave';
 
+function isCurrentWorkspaceSaved(documentId: string | null) {
+  const snapshot = useWorkspaceStore.getState().currentSnapshot;
+  const book = useBookStore.getState();
+  const { windows, activeWindowId } = useWindowStore.getState();
+  return !!snapshot && snapshot.documentId === documentId && snapshot.currentPage === book.currentPage && snapshot.scale === book.scale
+    && snapshot.activeWindowId === activeWindowId && JSON.stringify(snapshot.heldPages) === JSON.stringify(useHeldStore.getState().pages)
+    && JSON.stringify(snapshot.windows) === JSON.stringify(windows);
+}
+
 const solidButton = 'inline-flex min-h-10 items-center justify-center gap-2 border border-stone-900 bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-50';
 const outlineButton = 'inline-flex min-h-10 items-center justify-center gap-2 border border-[var(--border)] px-3 py-2 text-sm font-medium text-stone-700 transition hover:border-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50';
 
@@ -28,6 +37,8 @@ function App() {
   const [workflowError, setWorkflowError] = useState<string | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   const [showHeldPages, setShowHeldPages] = useState(false);
+  const [replaceDocumentId, setReplaceDocumentId] = useState<string | null>(null);
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importLock = useRef(false);
   const quickFlipOpener = useRef<HTMLElement | null>(null);
@@ -56,8 +67,19 @@ function App() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, [showHeldPages]);
-  const busy = isHydratingDocument || bookStatus === 'loading' || workspaceStatus === 'restoring';
+  const busy = isHydratingDocument || bookStatus === 'loading' || workspaceStatus === 'restoring'
+    || (workspaceStatus === 'saving' && workspace.unrestoredDocumentId === documentId);
   const ready = !!documentId && bookStatus === 'ready' && !busy;
+  const replacementNeedsConfirmation = replaceDocumentId === documentId && !!documentId && workspace.unrestoredDocumentId === documentId;
+  const flushWorkspace = useCallback(async (id: string) => {
+    // A late scroll/render event may settle while the first write is pending.
+    // Freeze input during transitions, then persist that final revision as well.
+    do {
+      await saveWorkspace(id);
+      if (useWorkspaceStore.getState().error || useBookStore.getState().documentId !== id) return false;
+    } while (!isCurrentWorkspaceSaved(id));
+    return true;
+  }, [saveWorkspace]);
 
   const importFile = useCallback(async (file: File) => {
     if (importLock.current) return;
@@ -72,8 +94,7 @@ function App() {
     try {
       const previousBook = useBookStore.getState();
       if (previousBook.documentId && previousBook.status === 'ready') {
-        await saveWorkspace(previousBook.documentId);
-        if (useWorkspaceStore.getState().error) {
+        if (!await flushWorkspace(previousBook.documentId)) {
           setWorkflowError('当前阅读现场未能保存，已暂停切换书籍。请重试保存后再导入，避免丢失刚才的更改。');
           return;
         }
@@ -92,7 +113,7 @@ function App() {
       setIsHydratingDocument(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
-  }, [loadDocument, closeQuickFlip, registerCurrentBook, resetHeldPages, resetWindows, restoreWorkspace, saveWorkspace]);
+  }, [loadDocument, closeQuickFlip, registerCurrentBook, resetHeldPages, resetWindows, restoreWorkspace, flushWorkspace]);
 
   useEffect(() => { void hydrateRecentBooks(); }, [hydrateRecentBooks]);
 
@@ -101,8 +122,14 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (busy || event.defaultPrevented || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.key === 'Escape' && !isQuickFlipVisible) {
+        if (replacementNeedsConfirmation) {
+          event.preventDefault();
+          setReplaceDocumentId(null);
+          saveButtonRef.current?.focus();
+          return;
+        }
         if (showHeldPages) {
           event.preventDefault();
           setShowHeldPages(false);
@@ -127,15 +154,14 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [ready, isQuickFlipVisible, activePage, showQuickFlip, dismissQuickFlip, showHeldPages]);
+  }, [ready, busy, isQuickFlipVisible, activePage, showQuickFlip, dismissQuickFlip, showHeldPages, replacementNeedsConfirmation]);
 
   const returnToLibrary = async () => {
     if (!ready || importLock.current) return;
     importLock.current = true;
     setIsHydratingDocument(true);
     try {
-      if (documentId) await saveWorkspace(documentId);
-      if (useWorkspaceStore.getState().error) return;
+      if (documentId && !await flushWorkspace(documentId)) return;
       closeQuickFlip();
       resetHeldPages();
       resetWindows();
@@ -151,16 +177,23 @@ function App() {
     navigateActive(page);
   };
   const error = workflowError || workspace.error || book.error;
-  const snapshot = workspace.currentSnapshot;
-  const saved = snapshot?.documentId === documentId && snapshot.currentPage === currentPage && snapshot.scale === scale
-    && snapshot.activeWindowId === activeWindowId && JSON.stringify(snapshot.heldPages) === JSON.stringify(heldPages)
-    && JSON.stringify(snapshot.windows) === JSON.stringify(windows);
+  const saved = isCurrentWorkspaceSaved(documentId);
   const retryStorage = () => {
+    setReplaceDocumentId(null);
     setWorkflowError(null);
     setDismissedError(null);
     if (workspace.errorOperation === 'recent') void hydrateRecentBooks();
     else if (workspace.errorOperation === 'restore' && documentId) void restoreWorkspace(documentId);
     else if (documentId) void saveWorkspace(documentId);
+  };
+  const requestSave = () => {
+    if (!documentId) return;
+    if (workspace.unrestoredDocumentId === documentId) setReplaceDocumentId(documentId);
+    else void saveWorkspace(documentId);
+  };
+  const closeReplaceConfirmation = () => {
+    setReplaceDocumentId(null);
+    saveButtonRef.current?.focus();
   };
 
   return (
@@ -173,23 +206,34 @@ function App() {
           </div>
           <div className="order-3 flex w-full min-w-0 items-center justify-between gap-3 text-xs text-stone-500 sm:order-none sm:w-auto sm:flex-1 sm:px-4">
             <span className="truncate">{documentId ? `${documentName || '当前书籍'} · 第 ${currentPage} 页` : '让线性翻页，成为空间化阅读'}</span>
-            <span role="status" className="shrink-0">{busy ? '正在打开…' : workspaceStatus === 'saving' ? '正在保存…' : workspaceStatus === 'error' ? '保存或恢复遇到问题' : saved ? '已保存到本机' : ready ? '更改待保存' : ''}</span>
+            <span role="status" className="shrink-0">{workspaceStatus === 'saving' ? '正在保存…' : busy ? '正在打开…' : workspaceStatus === 'error' ? '保存或恢复遇到问题' : saved ? '已保存到本机' : ready ? '更改待保存' : ''}</span>
           </div>
           <div className="flex shrink-0 gap-2">
             <input aria-label="选择 PDF 文件" type="file" ref={fileInputRef} onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); }} accept=".pdf,application/pdf" className="hidden" disabled={busy} />
             <button disabled={busy} onClick={() => fileInputRef.current?.click()} className={solidButton}>导入书籍</button>
-            {documentId && <button onClick={() => documentId && void saveWorkspace(documentId)} disabled={!ready || workspaceStatus === 'saving'} className={outlineButton}>保存现场</button>}
+            {documentId && <button ref={saveButtonRef} onClick={requestSave} disabled={!ready || workspaceStatus === 'saving'} className={outlineButton}>保存现场</button>}
           </div>
         </header>
 
+        {replacementNeedsConfirmation && documentId && <div role="group" aria-label="确认替换上次现场" aria-describedby="workspace-replacement-warning" onKeyDown={event => {
+          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeReplaceConfirmation(); }
+        }} className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p id="workspace-replacement-warning" className="min-w-0 flex-1">上次现场尚未恢复。覆盖会用当前页码、夹页和窗口布局替换它；原 PDF 不受影响。</p>
+          <button aria-describedby="workspace-replacement-warning" className="min-h-10 border border-amber-900 px-3 py-2" onClick={() => {
+            closeReplaceConfirmation(); setWorkflowError(null); setDismissedError(null);
+            void saveWorkspace(documentId, { replaceUnrestored: true });
+          }}>覆盖上次现场</button>
+          <button autoFocus aria-describedby="workspace-replacement-warning" className="min-h-10 px-3 py-2 underline" onClick={closeReplaceConfirmation}>取消覆盖</button>
+        </div>}
+
         {error && error !== dismissedError && <div role="alert" className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          <span className="min-w-0 flex-1">{workflowError || (workspace.error ? `本机存储遇到问题：${workspace.error}` : '文件加载失败，请检查 PDF 后重新导入。')}</span>
-          {workspace.error && workspace.errorOperation !== 'open' && workspace.errorOperation !== 'register' && <button className="underline underline-offset-4" onClick={retryStorage} disabled={busy}>{workspace.errorOperation === 'restore' ? '重试恢复' : workspace.errorOperation === 'recent' ? '重试读取' : '重试保存'}</button>}
+          <span className="min-w-0 flex-1">{workflowError || (workspace.errorOperation === 'register' ? 'PDF 尚未保存到本机，请保留原文件。可以继续阅读，重试保存成功后再切换书籍或回到书库。' : workspace.error ? `本机存储遇到问题：${workspace.error}` : '文件加载失败，请检查 PDF 后重新导入。')}</span>
+          {workspace.error && workspace.errorOperation !== 'open' && <button className="underline underline-offset-4" onClick={retryStorage} disabled={busy || workspaceStatus === 'saving'}>{workspace.errorOperation === 'restore' ? '重试恢复' : workspace.errorOperation === 'recent' ? '重试读取' : '重试保存'}</button>}
           <button className="underline underline-offset-4" onClick={() => fileInputRef.current?.click()} disabled={busy}>重新导入</button>
           <button aria-label="关闭提示" className="p-2" onClick={() => setDismissedError(error)}><X size={18} /></button>
         </div>}
 
-        {documentId && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2 sm:px-6">
+        {documentId && <div inert={busy} className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2 sm:px-6">
           <button className={outlineButton} disabled={!ready} onClick={() => showQuickFlip(activePage)}><BookOpen size={16} />速翻<span className="hidden text-xs text-stone-600 sm:inline">Space</span></button>
           <button className={outlineButton} disabled={!ready} onClick={() => void holdPage(activePage)}><BookmarkPlus size={16} />{heldPages.some((page) => page.pageNumber === activePage) ? '已夹住此页' : '夹住此页'}</button>
           <button ref={heldToggleRef} className={`${outlineButton} ml-auto lg:hidden`} aria-expanded={showHeldPages} aria-controls="held-pages-panel" onClick={() => showHeldPages ? closeHeldPanel() : setShowHeldPages(true)}><Layers size={16} />夹页 {heldPages.length}</button>
@@ -204,7 +248,7 @@ function App() {
         </div>}
 
         {(windowNotice || heldNotice) && <div role="status" className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-950"><span>{windowNotice || heldNotice}</span><button aria-label="关闭操作提示" className="p-2" onClick={() => { clearWindowNotice(); useHeldStore.getState().clearNotice(); }}><X size={16} /></button></div>}
-        <main className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        <main inert={busy} className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <section inert={showHeldPages} className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#edece9]">
             {documentId ? <WorkspaceCanvas windows={windows} onWindowUpdate={(win) => { updateWindow(win.id, win); if (win.isActive) setActiveWindow(win.id); }} onWindowClose={closeWindow} /> : (
               <div className="flex min-h-0 flex-1 overflow-y-auto bg-[var(--surface)] p-4 sm:p-8 lg:items-center lg:justify-center">
@@ -245,7 +289,7 @@ function App() {
             }} onPageClick={(page) => { openInNewWindow(page.pageNumber); closeHeldPanel(); }} onRemovePage={(id, closeReferences) => { const page = heldPages.find((candidate) => candidate.id === id); if (page) { if (closeReferences) useWindowStore.getState().closeWindowsForPage(page.pageNumber); unholdPage(page.pageNumber); } }} />
           </aside>}
         </main>
-        {documentId && <footer className="h-16 shrink-0 border-t border-[var(--border)]"><TimelineBar key={`${documentId}:${activeWindowId}:${isQuickFlipVisible}:${showHeldPages}`} currentPage={activePage} chapters={book.toc} totalPages={totalPages} onPageClick={jumpToPage} markers={heldPages.map((page) => page.pageNumber)} /></footer>}
+        {documentId && <footer inert={busy} className="h-16 shrink-0 border-t border-[var(--border)]"><TimelineBar key={`${documentId}:${activeWindowId}:${isQuickFlipVisible}:${showHeldPages}:${busy}`} currentPage={activePage} chapters={book.toc} totalPages={totalPages} onPageClick={jumpToPage} markers={heldPages.map((page) => page.pageNumber)} /></footer>}
       </div>
       {isQuickFlipVisible && ready && <QuickFlipOverlay isVisible restoreFocusOnClose={false} onClose={dismissQuickFlip} currentPage={quickFlipOrigin.current.page} totalPages={totalPages} onPageChange={page => { updateWindow(quickFlipOrigin.current.windowId, { pageNumber: page }); setActiveWindow(quickFlipOrigin.current.windowId); }} />}
     </>

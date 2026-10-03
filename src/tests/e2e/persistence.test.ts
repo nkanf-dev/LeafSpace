@@ -97,6 +97,9 @@ test('malformed saved layout reports a recoverable error without orphan referenc
   await expect(page.locator('[data-floating-window]')).toHaveCount(0);
   await expect(page.getByRole('button', { name: '阅读第 4 页', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '保存现场', exact: true }).click();
+  await expect(page.getByRole('group', { name: '确认替换上次现场' })).toBeVisible();
+  expect((await snapshots(page))[0].heldPages).toBeNull();
+  await page.getByRole('button', { name: '覆盖上次现场', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect.poll(async () => Array.isArray((await snapshots(page))[0]?.heldPages)).toBe(true);
   await reopenRecent(page);
