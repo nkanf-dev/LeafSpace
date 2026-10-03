@@ -214,6 +214,7 @@ for (const failure of ['schema', 'metadata'] as const) {
     await page.getByRole('button', { name: '保存现场', exact: true }).click();
     await expect(page.getByRole('alert')).toBeVisible();
     expect((await probe(page)).assetWrites).toBe(0);
+    await info.attach(`${failure}-before-readback-screen`, { body: await page.screenshot(), contentType: 'image/png' });
     await expect(reader(page).locator('canvas')).toBeVisible();
     const initialPixels = await fixturePixels(page);
     await info.attach(`${failure}-initial-decoded-pixels`, { body: JSON.stringify(initialPixels), contentType: 'application/json' });
