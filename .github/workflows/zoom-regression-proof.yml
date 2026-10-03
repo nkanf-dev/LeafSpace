@@ -1,0 +1,27 @@
+name: Zoom regression baseline proof
+on:
+  push:
+    branches: [qa/zoom-regression-before]
+permissions:
+  contents: read
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test zoom-position.test.ts --project=chromium --workers=1 --retries=0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zoom-before-evidence
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
