@@ -1,98 +1,37 @@
-name: Product quality
+name: Mouse pan target comparison
 on:
-  pull_request:
   push:
-    branches: [main, 'dev/**']
+    branches: [dev/diag-pan-target]
 permissions:
   contents: read
-concurrency:
-  group: quality-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
-  checks:
+  compare:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run build
-      - run: npm run check:deploy
-        env:
-          WRANGLER_SEND_METRICS: false
-      - run: npm run test:unit
-      - run: npm run test:ui
-  browser-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        engine: [chromium, firefox, webkit]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps ${{ matrix.engine }}
-      - name: Run isolated browser acceptance
-        run: |
-          if [ "${{ matrix.engine }}" = "chromium" ]; then
-            npm run test:e2e -- --project=chromium --project=tablet --project=mobile
-          elif [ "${{ matrix.engine }}" = "webkit" ]; then
-            npm run test:e2e -- --project=webkit --project=mobile-webkit --workers=1
-          else
-            npm run test:e2e -- --project=firefox
-          fi
-      - name: Repeat input and canvas regressions without retries
-        if: matrix.engine == 'webkit'
-        run: npx playwright test responsive.test.ts workflow.test.ts storage-metadata.test.ts --project=webkit --workers=1 --grep 'mobile page tabs|holding an arrow enters accelerated|during schema failure' --repeat-each=5 --retries=0 --output=test-results-stability --reporter=line
-      - name: Repeat native Firefox release and cancel regressions
-        if: matrix.engine == 'firefox'
-        run: npx playwright test workflow.test.ts --project=firefox --workers=2 --grep 'Escape cancels selection|holding an arrow enters accelerated' --repeat-each=5 --retries=0 --output=test-results-stability --reporter=line
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: leafspace-browser-evidence-${{ matrix.engine }}
-          path: |
-            playwright-report/
-            test-results/
-            test-results-stability/
-          retention-days: 14
-  baseline-evidence:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+        source: [ce59b35e3f0069c3c9f7dcdbee48eb65cd78f7a7, 5475ec941c95371d05b63df4e2963f606a2e1367]
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - run: |
+          cp src/tests/e2e/pan-owner-diagnostic.test.ts /tmp/pan-owner-diagnostic.test.ts
+          git checkout --detach '${{ matrix.source }}'
+          cp /tmp/pan-owner-diagnostic.test.ts src/tests/e2e/pan-owner-diagnostic.test.ts
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - name: Capture the pinned pre-polish application
-        run: |
-          git worktree add /tmp/leafspace-baseline c0afcfde42c86627e055e8c12b914539aa11b98b
-          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/leafspace-baseline/node_modules
-          (cd /tmp/leafspace-baseline && npm run build && npm run preview -- --host 127.0.0.1 --port 4174 --strictPort) > /tmp/baseline-server.log 2>&1 &
-          SERVER_PID=$!
-          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
-          for attempt in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:4174/ >/dev/null; then break; fi
-            sleep 1
-          done
-          node scripts/capture-baseline.mjs
+      - run: npx playwright install --with-deps webkit
+      - run: npx playwright test pan-owner-diagnostic.test.ts --project=webkit --workers=1 --repeat-each=5 --retries=0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: leafspace-before-polish
-          path: baseline-evidence/
+          name: pan-target-${{ matrix.source }}
+          path: |
+            playwright-report/
+            test-results/
           retention-days: 14
