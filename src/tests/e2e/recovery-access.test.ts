@@ -67,6 +67,12 @@ test('dismissed restoration has a direct keyboard recovery path without overwrit
   expect((await details.boundingBox())!.height).toBeGreaterThanOrEqual(40);
   await info.attach('restore-guidance-dismissed-320', { body: await page.screenshot(), contentType: 'image/png' });
   await page.keyboard.press('Enter'); await expect(alert).toBeFocused(); await noHorizontalOverflow(page);
+  const message = await page.locator('#workspace-problem-message').boundingBox();
+  const recovery = await page.getByRole('button', { name: '重试恢复', exact: true }).boundingBox();
+  expect(message!.width).toBeGreaterThanOrEqual(286);
+  expect(recovery!.y).toBeGreaterThanOrEqual(message!.y + message!.height);
+  await expect(alert).toHaveCSS('outline-offset', '-3px');
+  await info.attach('restore-guidance-focused-320', { body: await page.screenshot(), contentType: 'image/png' });
   const accessibility = await new AxeBuilder({ page }).include('#workspace-problem-guidance').analyze();
   expect(accessibility.violations).toEqual([]);
   await fault(page, { restore: false });
