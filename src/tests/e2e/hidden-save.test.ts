@@ -14,12 +14,12 @@ async function freezeDebounce(page: Page) {
 }
 async function installFault(page: Page) {
   await page.addInitScript(() => {
-    const state = { failSave: false, failRestore: false, puts: 0 };
+    const state = { failSave: false, failRestore: false, puts: 0, writes: [] as unknown[] };
     Object.assign(window, { leafspaceHiddenFault: state });
     const put = IDBObjectStore.prototype.put, get = IDBObjectStore.prototype.get;
     IDBObjectStore.prototype.put = function (...args) {
       if (this.name === 'workspaces') {
-        state.puts++;
+        state.puts++; state.writes.push(structuredClone(args[0]));
         if (state.failSave) throw new DOMException('Synthetic hidden save failure', 'QuotaExceededError');
       }
       return put.apply(this, args);
@@ -71,6 +71,7 @@ test('failed hidden saving remains explicit and does not retry on visibility or 
   await page.getByRole('button', { name: '保存现场', exact: true }).click();
   await expect(page.getByText('已保存到本机', { exact: true })).toBeVisible();
   expect((await snapshots(page))[0].currentPage).toBe(2);
+  await info.attach('hidden-retry-write-snapshots', { body: JSON.stringify(await fault(page), null, 2), contentType: 'application/json' });
   expect((await fault(page)).puts).toBe(2);
   await visibility(page, false); await reopenRecent(page); await expectMainPage(page, 2);
   await info.attach('hidden-save-explicit-recovery', { body: await page.screenshot(), contentType: 'image/png' });
