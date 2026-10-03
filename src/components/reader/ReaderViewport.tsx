@@ -169,7 +169,9 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     const horizontalPadding = window.innerWidth < 640 ? 32 : 80;
     // 100% is a paper-sized page that fits the current reader. Zoom stays relative
     // to that baseline so mobile and narrow comparison panes are readable by default.
-    if (container.clientWidth > 0) setPageWidth(Math.min(612, Math.max(1, container.clientWidth - horizontalPadding)));
+    // Include the two paper borders. Explicit vertical scroll space below keeps
+    // this baseline stable even where custom scrollbars ignore scrollbar-gutter.
+    if (container.clientWidth > 0) setPageWidth(Math.min(612, Math.max(1, container.clientWidth - horizontalPadding - 2)));
     const availableWidth = Math.max(0, container.clientWidth - horizontalPadding);
 
     setShouldCenterHorizontally(contentFrame.offsetWidth <= availableWidth + 2);
@@ -186,8 +188,15 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     const frame = contentFrameRef.current?.getBoundingClientRect();
     if (!frame) return;
     // Anchor the same point on the paper, including fit-width centering/padding.
-    container.scrollLeft += frame.left - bounds.left + ((x - frameX) / oldScale) * scale - (centered ? container.clientWidth / 2 : x);
-    container.scrollTop += frame.top - bounds.top + ((y - frameY) / oldScale) * scale - (centered ? container.clientHeight / 2 : y);
+    const left = container.scrollLeft + frame.left - bounds.left + ((x - frameX) / oldScale) * scale - (centered ? container.clientWidth / 2 : x);
+    const top = container.scrollTop + frame.top - bounds.top + ((y - frameY) / oldScale) * scale - (centered ? container.clientHeight / 2 : y);
+    container.scrollLeft = left;
+    container.scrollTop = top;
+    // Some engines truncate scroll writes. Choose the nearest pixel there so
+    // alternating zooms do not accumulate a directional bias; retain subpixels
+    // where supported, and leave genuine boundary clamps alone.
+    if (left >= 0 && left <= container.scrollWidth - container.clientWidth && Math.abs(container.scrollLeft - left) > 0.5) container.scrollLeft = Math.round(left);
+    if (top >= 0 && top <= container.scrollHeight - container.clientHeight && Math.abs(container.scrollTop - top) > 0.5) container.scrollTop = Math.round(top);
     syncPanTargetToContainer();
     zoomPivot.current = null;
   }, [scale, syncPanTargetToContainer]);
@@ -597,7 +606,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
         onMouseDownCapture={handleViewportFocus}
         onKeyDown={handleViewportKeyDown}
         onScroll={handleScroll}
-        style={{ cursor: mode === 'grab' ? (isPanning ? 'grabbing' : 'grab') : 'default', overflowAnchor: 'none', touchAction: mode === 'grab' && shouldCenterHorizontally ? 'pan-y' : 'pan-x pan-y' }}
+        style={{ cursor: mode === 'grab' ? (isPanning ? 'grabbing' : 'grab') : 'default', overflowAnchor: 'none', overflowY: 'scroll', touchAction: mode === 'grab' && shouldCenterHorizontally ? 'pan-y' : 'pan-x pan-y' }}
       >
         <div
           className="flex h-max min-h-full w-fit min-w-full shrink-0 px-4 py-6 sm:px-10 sm:py-[60px]"
