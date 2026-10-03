@@ -225,8 +225,11 @@ for (const failure of ['schema', 'metadata'] as const) {
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const settledPixels = await fixturePixels(page);
     await info.attach(`${failure}-settled-decoded-pixels`, { body: JSON.stringify(settledPixels), contentType: 'application/json' });
-    expect(settledPixels.background).toEqual([240, 237, 224, 255]);
-    expect(settledPixels.rectangle).toEqual([51, 128, 76, 255]);
+    for (const pixels of [initialPixels, settledPixels]) {
+      expect(pixels.background).toEqual([240, 237, 224, 255]);
+      expect(pixels.rectangle).toEqual([51, 128, 76, 255]);
+      if (pixels.attributes && 'willReadFrequently' in pixels.attributes) expect(pixels.attributes.willReadFrequently).toBe(true);
+    }
     await info.attach(`${failure}-failure-readable`, { body: await page.screenshot(), contentType: 'image/png' });
     await page.getByRole('button', { name: '选择文字', exact: true }).click();
     const text = reader(page).locator('.textLayer span').filter({ hasText: /^LeafSpace test book$/ }).first();
