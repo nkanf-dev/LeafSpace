@@ -407,7 +407,7 @@ function App() {
             )}
           </section>
           {documentId && <aside id="held-pages-panel" aria-label="夹页列表" className={`${showHeldPages ? 'absolute inset-0 z-30 flex' : 'hidden'} min-h-0 w-full shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface)] lg:static lg:flex lg:w-[280px]`}>
-            <button ref={heldBackRef} className="min-h-11 border-b border-[var(--border)] px-5 text-left text-sm lg:hidden" onClick={closeHeldPanel}>← 返回阅读</button>
+            <button ref={heldBackRef} className="min-h-11 shrink-0 border-b border-[var(--border)] px-5 text-left text-sm lg:hidden" onClick={closeHeldPanel}>← 返回阅读</button>
             <HeldPagesPanel metadataContextKey={`${documentId}:${sessionId}:${metadataGeneration}:${showHeldPages}:${busy}:${isQuickFlipVisible}`} onUpdateMetadata={(id, changes) => {
               const current = useBookStore.getState();
               if (!ready || importLock.current || current.documentId !== documentId || current.sessionId !== sessionId || current.status !== 'ready' || useWorkspaceStore.getState().status === 'restoring') return false;

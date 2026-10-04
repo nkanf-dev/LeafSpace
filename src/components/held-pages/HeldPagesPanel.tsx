@@ -146,8 +146,8 @@ export const HeldPagesPanel: React.FC<Props> = ({ pages, thumbnailActions, actio
     return () => window.removeEventListener('resize', resize);
   }, [cancelPendingRead, editing]);
   return (
-    <div className="flex h-full flex-col bg-[var(--surface)]">
-      <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4 text-sm font-semibold text-stone-600">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--surface)]">
+      <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-5 py-4 text-sm font-semibold text-stone-600">
         <h2 ref={headingRef} tabIndex={-1}>夹住的页面 ({pages.length})</h2>
         <div className="flex bg-[#f0ede9] p-0.5">
           <button type="button" aria-label="卡片视图" title="卡片视图" aria-pressed={viewMode === 'card'} className={`p-2 ${viewMode === 'card' ? 'bg-white shadow-sm' : 'opacity-60'}`} onClick={() => { cancelPendingRead(); longPress.cancel(); setEditing(null); setViewMode('card'); }}><LayoutGrid size={15} /></button>

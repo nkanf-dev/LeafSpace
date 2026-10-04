@@ -18,6 +18,26 @@ async function openPanel(page: Page) {
   const toggle = page.getByRole('button', { name: '夹页 1', exact: true });
   if ((page.viewportSize()?.width ?? 0) < 1024 && await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
 }
+async function expectHeldPanelChrome(page: Page) {
+  if ((page.viewportSize()?.width ?? 0) >= 1024) return;
+  const back = page.getByRole('button', { name: '← 返回阅读', exact: true });
+  await expect(back).toBeVisible();
+  const geometry = await back.evaluate(button => {
+    const aside = button.closest('aside')!, main = aside.closest('main')!;
+    const rect = button.getBoundingClientRect(), bounds = aside.getBoundingClientRect(), mainBounds = main.getBoundingClientRect();
+    const range = document.createRange(); range.selectNodeContents(button);
+    const text = Array.from(range.getClientRects());
+    const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    return { height: rect.height, top: rect.top, mainTop: mainBounds.top, asideTop: bounds.top, asideScroll: aside.scrollTop,
+      mainScroll: main.scrollTop, textContained: text.every(line => line.top >= Math.max(rect.top, mainBounds.top) - 1
+        && line.bottom <= Math.min(rect.bottom, mainBounds.bottom) + 1),
+      centerReachable: !!hit && button.contains(hit), outerScroll: document.documentElement.scrollTop + document.body.scrollTop };
+  });
+  expect(geometry.height).toBeGreaterThanOrEqual(44);
+  expect(geometry.top).toBeGreaterThanOrEqual(geometry.asideTop - 1);
+  expect(geometry).toMatchObject({ asideScroll: 0, mainScroll: 0, textContained: true, centerReachable: true, outerScroll: 0 });
+  return geometry;
+}
 async function save(page: Page) {
   await page.getByRole('button', { name: '保存现场', exact: true }).click();
   await expect(page.getByText('已保存到本机', { exact: true })).toBeVisible();
@@ -94,6 +114,7 @@ test('held names and notes keep the reading scene and original PDF intact throug
   await form(page).getByRole('textbox', { name: '备注', exact: true }).fill(note);
   await form(page).getByRole('button', { name: '保存', exact: true }).scrollIntoViewIfNeeded();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expectHeldPanelChrome(page);
   const accessibility = await new AxeBuilder({ page }).include('[data-held-metadata-editor]').withTags(['wcag2a', 'wcag2aa']).analyze();
   expect(accessibility.violations).toEqual([]);
   await info.attach('held-metadata-editor', { body: await page.screenshot(), contentType: 'image/png' });
@@ -140,4 +161,32 @@ test('editor Escape and book replacement never publish a draft or close its refe
   const original = both.find(snapshot => snapshot.documentId === before.documentId)!;
   expect(original.heldPages).toEqual(before.heldPages); expect(original.windows).toEqual(before.windows);
   expect(both.find(snapshot => snapshot.documentId !== before.documentId)!.heldPages).toEqual([]);
+});
+
+test('short narrow held editors scroll without clipping their return control', async ({ page }, info) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await prepare(page);
+  const pinned = (await expectHeldPanelChrome(page))!;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await edit(page).click();
+    await form(page).getByRole('textbox', { name: '备注', exact: true }).fill('短屏幕也能安心记录，再回到阅读');
+    const cancel = form(page).getByRole('button', { name: '取消', exact: true });
+    await cancel.scrollIntoViewIfNeeded();
+    expect(await expectHeldPanelChrome(page)).toMatchObject({ top: pinned.top, mainTop: pinned.mainTop });
+    await expect(cancel).toBeVisible();
+    if (attempt === 0) await info.attach('short-held-editor-scroll', { body: await page.screenshot(), contentType: 'image/png' });
+    await cancel.click(); await expect(form(page)).toHaveCount(0);
+    await expectHeldPanelChrome(page);
+  }
+  await edit(page).click();
+  await form(page).getByRole('textbox', { name: '名称', exact: true }).fill('短屏回看');
+  const commit = form(page).getByRole('button', { name: '保存', exact: true });
+  await commit.scrollIntoViewIfNeeded(); await expectHeldPanelChrome(page);
+  await commit.click(); await expect(form(page)).toHaveCount(0);
+  await expectHeldPanelChrome(page);
+  await page.getByRole('button', { name: '← 返回阅读', exact: true }).click();
+  await expect(reader(page)).toBeVisible();
+  const scene = await save(page);
+  expect(scene.heldPages[0].note).toBeUndefined(); expect(scene.heldPages[0].customName).toBe('短屏回看');
+  expect(scene.currentPage).toBe(3);
 });
