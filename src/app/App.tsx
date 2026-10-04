@@ -320,7 +320,7 @@ function App() {
           <section inert={showHeldPages} className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#edece9]">
             {documentId ? <WorkspaceCanvas subscribeInterruption={thumbnailActions.controller.onInterrupt} windows={windows} onWindowUpdate={(win) => { updateWindow(win.id, win); if (win.isActive) setActiveWindow(win.id); }} onWindowClose={closeReferenceWindow} /> : (
               <div className="flex min-h-0 flex-1 overflow-y-auto bg-[var(--surface)] p-4 sm:p-8 lg:items-center lg:justify-center">
-                <div className="m-auto grid w-full max-w-[1080px] grid-cols-1 border border-[var(--border)] bg-[var(--surface)] shadow-[0_24px_70px_rgba(28,25,23,0.05)] md:grid-cols-[1.15fr_0.85fr]">
+                <div className="m-auto grid w-full max-w-[1080px] grid-cols-1 border border-[var(--border)] bg-[var(--surface)] shadow-[0_24px_70px_rgba(28,25,23,0.05)] md:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
                   <div className="px-6 py-9 sm:px-10 sm:py-12 md:border-r md:border-[var(--border)]">
                     <div className="mb-5 text-xs font-semibold tracking-[0.2em] text-stone-500">为深度阅读，留一片空间</div>
                     <h1 className="text-4xl font-extrabold tracking-tight text-stone-900 sm:text-5xl" style={{ fontFamily: 'Georgia, serif' }}>页境阅读</h1>
@@ -333,7 +333,7 @@ function App() {
                       <li><strong className="mr-3 text-stone-800">03 对照</strong>夹住关键页，打开参考窗口并排研读</li>
                     </ol>
                   </div>
-                  <div className="border-t border-[var(--border)] bg-[#f6f1e8] px-6 py-8 sm:px-8 md:border-t-0">
+                  <div className="min-w-0 border-t border-[var(--border)] bg-[#f6f1e8] px-6 py-8 sm:px-8 md:border-t-0">
                     <div className="mb-6 flex items-baseline justify-between border-b border-[var(--border)] pb-4"><h2 className="text-xl font-semibold text-stone-900">最近打开</h2><span className="text-xs text-stone-500">{recentBooks.length} 本</span></div>
                     <div className="space-y-3">{recentBooks.length ? recentBooks.map((recent) => (
                       <button key={recent.documentId} type="button" disabled={busy} className="flex w-full items-start gap-3 border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:border-stone-700 disabled:opacity-50" onClick={() => { setWorkflowError(null); setDismissedError(null); closeQuickFlip(); void openRecentBook(recent.documentId); }}>

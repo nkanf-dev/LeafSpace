@@ -79,6 +79,25 @@ describe('App document workflows', () => {
     resetWorkspaceStoreDependencies();
   });
 
+  it('constrains the library grid without shortening a long recent filename', async () => {
+    const { recent } = setupDependencies();
+    const fileName = `SyntheticLibraryLayout测试文档${'样例章节LongUnbrokenIdentifier0123456789'.repeat(12)}.pdf`;
+    recent.mockResolvedValue([{ documentId: 'synthetic-long-title', fileName, fileSize: 1024,
+      totalPages: 12, lastOpenedAt: '2026-01-01T00:00:00.000Z' }]);
+    render(<App />);
+
+    const title = await screen.findByText(fileName);
+    expect(title).toHaveClass('truncate');
+    expect(title.closest('button')).toHaveAccessibleName(new RegExp(`^${fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    // JSDOM guards the sizing contract; responsive browser tests measure pixels.
+    const intro = screen.getByRole('heading', { name: '页境阅读' }).parentElement!;
+    const recentPanel = screen.getByRole('heading', { name: '最近打开' }).parentElement!.parentElement!;
+    expect(intro.parentElement).toHaveClass('grid-cols-1', 'md:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]');
+    expect(recentPanel).toHaveClass('min-w-0');
+    expect(recentPanel).toContainElement(title);
+    expect(recent).toHaveBeenCalledTimes(1);
+  });
+
   it('provides a live autosave getter that blocks an idle registration until import finishes', async () => {
     const { register } = setupDependencies();
     let finish!: () => void;

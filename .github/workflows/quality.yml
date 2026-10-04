@@ -2,7 +2,7 @@ name: Product quality
 on:
   pull_request:
   push:
-    branches: [main, 'dev/**']
+    branches: [main]
 permissions:
   contents: read
 concurrency:

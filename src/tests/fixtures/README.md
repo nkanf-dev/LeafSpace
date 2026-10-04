@@ -1,6 +1,6 @@
 # Synthetic PDF fixtures
 
-These PDFs are generated in this repository and contain no personal, licensed, or external document content. They have real page trees, content streams, xref tables, and numbered or raster-image pages so Playwright exercises PDF.js parsing and rendering rather than mocked canvases.
+These PDFs are generated in this repository and contain no personal or user-supplied document content. They have real page trees, content streams, xref tables, and numbered or raster-image pages so Playwright exercises PDF.js parsing and rendering rather than mocked canvases.
 
 `leafspace-render-recovery.pdf` is a two-page 256×256 RGB raster control with red, green and white regions, small page labels and same-page internal link annotations. The full-page link exercises real PDF layer stacking above a rejected canvas. It contains no external URI, JavaScript, form or password. Regenerate with `node src/tests/fixtures/generate-render-recovery.mjs`; only Node built-ins are required. SHA-256: `be360fdfe93a8fea06be086c10f600ec30439905d4f58ef054151d051f780eda`.
 
@@ -24,3 +24,5 @@ The E2E suite uses a fresh browser context (including isolated IndexedDB) per te
 Regenerate the small decoder controls with `node src/tests/fixtures/generate-jpx-fixtures.mjs`. The script uses only Node built-ins and an embedded, SHA-256-verified JP2 stream. Its original encoder was Python 3.12.14, Pillow 12.3.0 and OpenJPEG 2.5.4 with lossless `irreversible=False`; `reencode-jpx.py` is an optional source re-encoder, not an application or CI dependency. `jpx-fixture-manifest.json` records source and PDF hashes. The RGB compression bytes may vary with zlib versions; both images retain identical decoded pixels.
 
 Decoder samples use intrinsic bitmap dimensions: center x at y=1/4 is RGBA `[210,40,40,255]`, y=3/4 is `[20,130,40,255]`, and y=1/2 is the white gap. Reader channels tolerate 2 levels and lossy thumbnail channels 24, with alpha exactly 255. The thumbnail tolerance follows measured WebP variation at small widths and is far below the 235-level error of missing-decoder white output.
+
+CJK embedded-font, missing-font routing, and independent Poppler glyph-shape controls are documented in [CJK-FIXTURES.md](CJK-FIXTURES.md), including the renamed Noto-derived subset and its SIL OFL license.

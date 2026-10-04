@@ -1,4 +1,5 @@
-import { test, expect, importBook, reader, quickFlip, snapshots, reopenRecent, expectQuickFlipThumbnail } from './helpers';
+import { test, expect, BOOK_PATH, importBook, reader, quickFlip, snapshots, reopenRecent, expectQuickFlipThumbnail } from './helpers';
+import { readFile } from 'node:fs/promises';
 import type { Page, TestInfo } from '@playwright/test';
 
 async function capture(page: Page, testInfo: TestInfo, name: string) {
@@ -16,6 +17,81 @@ async function showHeldPages(page: Page) {
   const toggle = page.getByRole('button', { name: /^夹页 \d+$/ });
   if (await toggle.isVisible()) await toggle.click();
 }
+
+test('long recent filenames stay inside the library without squeezing its introduction', async ({ page }, testInfo) => {
+  const fileName = `SyntheticLibraryLayout测试文档${'样例章节LongUnbrokenIdentifier0123456789'.repeat(12)}.pdf`;
+  await page.goto('/');
+  await page.locator('input[type="file"]').setInputFiles({ name: fileName, mimeType: 'application/pdf', buffer: await readFile(BOOK_PATH) });
+  await expect(reader(page).locator('canvas').first()).toBeVisible();
+  await page.getByRole('button', { name: '下一页', exact: true }).click();
+  await expect(page.locator('header')).toContainText('第 2 页');
+  await page.getByRole('button', { name: '回到书库', exact: true }).click();
+  const recent = page.getByRole('button').filter({ hasText: fileName });
+  await expect(recent).toBeEnabled();
+  const savedSnapshots = await snapshots(page);
+  const initialViewport = page.viewportSize()!;
+  const sizes = [initialViewport, ...(initialViewport.width >= 1024 ? [{ width: 2048, height: 1204 }] : []), { width: 320, height: 720 }];
+  for (const size of sizes) {
+    await page.setViewportSize(size);
+    const importButton = page.getByRole('button', { name: '导入一本 PDF', exact: true });
+    await importButton.scrollIntoViewIfNeeded();
+    await expect(importButton).toBeInViewport();
+    await capture(page, testInfo, `long-title-intro-${size.width}`);
+    await recent.scrollIntoViewIfNeeded();
+    await expect(recent).toBeInViewport();
+    await capture(page, testInfo, `long-title-recent-${size.width}`);
+    const geometry = await recent.evaluate((button) => {
+      const panel = button.parentElement!.parentElement!;
+      const grid = panel.parentElement!;
+      const intro = grid.firstElementChild!;
+      const title = button.querySelector<HTMLElement>('.truncate')!;
+      const lineCount = (element: Element) => {
+        const style = getComputedStyle(element);
+        const contentHeight = element.getBoundingClientRect().height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
+          - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth);
+        return contentHeight / parseFloat(style.lineHeight);
+      };
+      const bounds = (element: Element) => {
+        const rect = element.getBoundingClientRect();
+        return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width };
+      };
+      const overflow = [];
+      // Document-only checks miss an overflowing nested library scroll area.
+      for (let element: HTMLElement | null = button as HTMLElement; element; element = element.parentElement) {
+        overflow.push({ tag: element.tagName, overflow: element.scrollWidth - element.clientWidth });
+      }
+      return { grid: bounds(grid), intro: bounds(intro), panel: bounds(panel), button: bounds(button), overflow,
+        headingLines: lineCount(intro.querySelector('h1')!), importLines: lineCount(intro.querySelector('button')!),
+        title: { text: title.textContent, width: title.clientWidth, scrollWidth: title.scrollWidth,
+          textOverflow: getComputedStyle(title).textOverflow, whiteSpace: getComputedStyle(title).whiteSpace } };
+    });
+    await testInfo.attach(`library-geometry-${size.width}`, { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
+    expect(geometry.overflow.every(item => item.overflow <= 1), 'No library ancestor has horizontal scroll range').toBe(true);
+    expect(geometry.button.left).toBeGreaterThanOrEqual(geometry.panel.left);
+    expect(geometry.button.right).toBeLessThanOrEqual(geometry.panel.right);
+    expect(geometry.grid.left).toBeGreaterThanOrEqual(0);
+    expect(geometry.grid.right).toBeLessThanOrEqual(size.width);
+    expect(geometry.title).toMatchObject({ text: fileName, textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
+    expect(geometry.title.width).toBeGreaterThan(40);
+    expect(geometry.title.scrollWidth).toBeGreaterThan(geometry.title.width);
+    expect(geometry.headingLines).toBeCloseTo(1, 1);
+    expect(geometry.importLines).toBeCloseTo(1, 1);
+    if (size.width >= 768) {
+      expect(geometry.intro.width / geometry.panel.width).toBeCloseTo(1.15 / 0.85, 2);
+      expect(Math.abs(geometry.intro.top - geometry.panel.top)).toBeLessThanOrEqual(1);
+    } else {
+      expect(Math.abs(geometry.intro.width - geometry.panel.width)).toBeLessThanOrEqual(1);
+      expect(geometry.panel.top).toBeGreaterThanOrEqual(geometry.intro.bottom - 1);
+    }
+  }
+  // Resize and truncation must leave the original recent entry usable and saved.
+  expect(await snapshots(page)).toEqual(savedSnapshots);
+  await recent.focus();
+  await page.keyboard.press('Enter');
+  await expect(reader(page).locator('.react-pdf__Page[data-page-number="2"] canvas')).toBeVisible();
+  await expect(page.locator('header')).toContainText(fileName);
+  expect((await snapshots(page))[0]?.currentPage).toBe(2);
+});
 
 test('welcome and reader remain usable at the project viewport', async ({ page }, testInfo) => {
   await page.goto('/');
