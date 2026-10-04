@@ -602,6 +602,25 @@ describe('App document workflows', () => {
     expect(workspaceStore.getState()).toMatchObject({ status: 'idle', error: null, unrestoredDocumentId: null });
   });
 
+  it('offers a fresh replacement confirmation after comparison reads fail, preserving live edits until retry succeeds', async () => {
+    const { restore, save } = setupDependencies(); openExistingBook();
+    restore.mockRejectedValue(new Error('Comparison read unavailable'));
+    await workspaceStore.getState().restoreWorkspace('old-book');
+    useBookStore.getState().setCurrentPage(3); render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '保存现场' }));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '覆盖上次现场' })));
+    expect(save).not.toHaveBeenCalled(); expect(useBookStore.getState().currentPage).toBe(3);
+    expect(screen.getByRole('alert')).toHaveTextContent('Comparison read unavailable'); expect(beforeUnloadIsBlocked()).toBe(true);
+    restore.mockResolvedValue(null);
+    fireEvent.click(screen.getByRole('button', { name: '重新确认覆盖' }));
+    expect(screen.getByRole('group', { name: '确认替换上次现场' })).toBeInTheDocument(); expect(save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '取消覆盖' })); expect(useBookStore.getState().currentPage).toBe(3);
+    fireEvent.click(screen.getByRole('button', { name: '重新确认覆盖' }));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '覆盖上次现场' })));
+    expect(save).toHaveBeenCalledOnce(); expect(useBookStore.getState().currentPage).toBe(3);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument(); expect(beforeUnloadIsBlocked()).toBe(false);
+  });
+
   it('cancels replacement before closing reference windows even after focus leaves the warning', async () => {
     const { restore } = setupDependencies();
     restore.mockRejectedValueOnce(new Error('Temporary storage read failure'));

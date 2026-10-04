@@ -271,6 +271,7 @@ function App() {
     setDismissedError(null);
     if (workspace.errorOperation === 'recent') void hydrateRecentBooks();
     else if (workspace.errorOperation === 'restore' && documentId) void restoreWorkspace(documentId);
+    else if (documentId && workspace.unrestoredDocumentId === documentId) setReplaceDocumentId(documentId);
     else if (documentId) void saveWorkspace(documentId);
   };
   const requestSave = () => {
@@ -329,7 +330,7 @@ function App() {
         {conflictNeedsConfirmation && conflictResolution && documentId && <div role="group" aria-label="确认解决现场冲突" aria-describedby="workspace-conflict-warning" onKeyDown={event => {
           if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeConflictConfirmation(); }
         }} className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          <p id="workspace-conflict-warning" className="min-w-0 flex-1">{conflictDescription(conflictResolution.conflict)}{conflictResolution.action === 'reload'
+          <p id="workspace-conflict-warning" className="min-w-0 basis-full sm:flex-1">{conflictDescription(conflictResolution.conflict)}{conflictResolution.action === 'reload'
             ? '载入检测到的已存现场会替换此标签页尚未保存的页码、夹页（含名称和备注）和窗口布局。此页更改将丢失；原 PDF 不受影响。若已存现场再次变化，会保留此页并重新提示。'
             : '将用此页当前的页码、夹页（含名称和备注）和窗口布局覆盖检测到的已存现场。已存现场将被替换；原 PDF 不受影响。若其他标签页再次保存，仍会暂停并提示。'}</p>
           <button aria-describedby="workspace-conflict-warning" disabled={busy || workspaceStatus === 'saving'} className="min-h-10 border border-amber-900 px-3 py-2" onClick={() => {
@@ -342,7 +343,7 @@ function App() {
 
         {problemVisible && <div ref={problemRef} id="workspace-problem-guidance" role="alert" aria-label="问题详情" aria-describedby="workspace-problem-message" tabIndex={-1} className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <span id="workspace-problem-message" className="min-w-0 basis-full sm:flex-1">{workflowError || (workspace.errorOperation === 'register' ? 'PDF 尚未保存到本机，请保留原文件。可以继续阅读，但刷新或关闭页面可能丢失未保存的现场；请先重试保存。' : workspace.error ? `本机存储遇到问题：${workspace.error}` : '文件加载失败，请检查 PDF 后重新导入。')}</span>
-          {workspace.error && workspace.errorOperation !== 'open' && !workspace.conflict && <button className="underline underline-offset-4" onClick={retryStorage} disabled={busy || workspaceStatus === 'saving'}>{workspace.errorOperation === 'restore' ? '重试恢复' : workspace.errorOperation === 'recent' ? '重试读取' : '重试保存'}</button>}
+          {workspace.error && workspace.errorOperation !== 'open' && !workspace.conflict && <button className="underline underline-offset-4" onClick={retryStorage} disabled={busy || workspaceStatus === 'saving'}>{workspace.errorOperation === 'restore' ? '重试恢复' : workspace.errorOperation === 'recent' ? '重试读取' : workspace.unrestoredDocumentId === documentId ? '重新确认覆盖' : '重试保存'}</button>}
           {workspace.conflict && <>
             <button className="min-h-10 underline underline-offset-4" disabled={busy || workspaceStatus === 'saving'} onClick={event => requestConflictResolution('reload', event.currentTarget)}>载入已存现场</button>
             <button className="min-h-10 underline underline-offset-4" disabled={busy || workspaceStatus === 'saving'} onClick={event => requestConflictResolution('overwrite', event.currentTarget)}>用此页覆盖</button>
