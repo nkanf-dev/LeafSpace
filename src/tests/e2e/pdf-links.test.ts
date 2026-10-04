@@ -185,10 +185,23 @@ test('missing internal destination has dismissible feedback and keeps a referenc
   const reference = page.getByRole('region', { name: /^参考阅读区/ }); await expectPage(reference, 1);
   await annotation(reference, '17R').click();
   await expect(page.getByRole('alert')).toContainText('无法打开此链接');
+  await info.attach('missing-reference-link-feedback', { body: await page.screenshot(), contentType: 'image/png' });
   await page.getByRole('button', { name: '关闭链接提示' }).focus(); await page.keyboard.press('Escape');
   await expect(page.getByText('无法打开此链接。可尝试目录或页码导航。')).toHaveCount(0);
   await expectPage(reference, 1); await expect(reference).toBeFocused(); await expect(page.locator('[data-floating-window]')).toHaveCount(1);
   await annotation(reference, '10R').click(); await expectPage(reference, 2);
+});
+
+test('missing main-reader link remains readable and can be dismissed without losing its page', async ({ page }, info) => {
+  await page.goto('/'); await importBook(page, fixture); await expectPage(reader(page), 1);
+  await annotation(reader(page), '17R').click();
+  const notice = page.getByRole('alert'); await expect(notice).toContainText('无法打开此链接');
+  const bounds = await notice.boundingBox(), viewport = page.viewportSize()!;
+  expect(bounds).not.toBeNull(); expect(bounds!.x).toBeGreaterThanOrEqual(0); expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+  await info.attach('missing-main-link-feedback', { body: await page.screenshot(), contentType: 'image/png' });
+  await page.getByRole('button', { name: '关闭链接提示' }).click();
+  await expect(notice).toHaveCount(0); await expect(reader(page)).toBeFocused(); await expectPage(reader(page), 1);
+  await annotation(reader(page), '10R').click(); await expectPage(reader(page), 2);
 });
 
 test('post-pinch internal-link ghost click is suppressed before PDF resolution while keyboard remains available', async ({ page }) => {

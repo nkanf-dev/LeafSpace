@@ -32,9 +32,13 @@ export function useReaderGestures(options: Options) {
   const suppressClickUntil = useRef(0);
   // React root capture runs before the reader's native capture listener.
   // Share this guard with PDF link capture so a post-gesture ghost click
-  // cannot navigate first. Keyboard activation (detail=0) stays available.
-  const suppressClick = useCallback((event: Pick<MouseEvent, 'detail' | 'preventDefault' | 'stopPropagation'>) => {
-    if (event.detail === 0 || performance.now() >= suppressClickUntil.current) return false;
+  // cannot navigate first. Firefox can report detail=1 for keyboard clicks;
+  // Pointer Events reserves pointerId=-1 for non-pointing activation. React's
+  // MouseEvent wrapper omits pointerId, so consult the native event as well.
+  const suppressClick = useCallback((event: Pick<MouseEvent, 'detail' | 'preventDefault' | 'stopPropagation'> & { nativeEvent?: MouseEvent }) => {
+    const source = event.nativeEvent ?? event;
+    if (event.detail === 0 || ('pointerId' in source && source.pointerId === -1)
+      || performance.now() >= suppressClickUntil.current) return false;
     event.preventDefault(); event.stopPropagation();
     return true;
   }, []);

@@ -207,7 +207,7 @@ describe('owner-scoped internal PDF link activation', () => {
       expect(windowStore.getState().windows).toHaveLength(2);
     } finally { window.removeEventListener('keydown', escaped); }
   });
-  it.each(['keyboard', 'later-pointer'])('blocks post-pinch link ghost clicks while preserving %s activation', async next => {
+  it.each(['keyboard', 'keyboard-pointer', 'later-pointer'])('blocks post-pinch link ghost clicks while preserving %s activation', async next => {
     load(); render(<ReaderViewport isMain windowId="main" />); const region = main(); geometry(region);
     const frame = region.querySelector<HTMLElement>('.w-max')!;
     vi.spyOn(frame, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 402, 602));
@@ -216,10 +216,18 @@ describe('owner-scoped internal PDF link activation', () => {
     const start = [touch(1, 100), touch(2, 200)];
     fireEvent(region, new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: start as unknown as Touch[] }));
     fireEvent(region, new TouchEvent('touchend', { bubbles: true, cancelable: true, touches: [], changedTouches: start as unknown as Touch[] }));
-    await act(async () => { metadata(region, 'chapter'); fireEvent.click(anchor(region), { detail: 1 }); });
+    await act(async () => {
+      metadata(region, 'chapter');
+      const ghost = new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 });
+      Object.defineProperty(ghost, 'pointerId', { value: 7 }); fireEvent(anchor(region), ghost);
+    });
     expect(pdf.getDestination).not.toHaveBeenCalled(); expect(useBookStore.getState().currentPage).toBe(1);
     if (next === 'later-pointer') now.mockReturnValue(1601);
-    await act(async () => { fireEvent.click(anchor(region), { detail: next === 'keyboard' ? 0 : 1 }); });
+    await act(async () => {
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true, detail: next === 'keyboard' ? 0 : 1 });
+      if (next === 'keyboard-pointer') Object.defineProperty(event, 'pointerId', { value: -1 });
+      fireEvent(anchor(region), event);
+    });
     expect(pdf.getDestination).toHaveBeenCalledOnce(); expect(useBookStore.getState().currentPage).toBe(3);
   });
   it('repeated same-destination activations complete only the latest ticket', async () => {
