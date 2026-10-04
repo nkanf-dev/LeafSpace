@@ -5,9 +5,13 @@ on:
 permissions:
   contents: read
 jobs:
-  baseline:
+  candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, firefox, webkit]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,12 +19,19 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npx playwright test pdf-links.test.ts --project=chromium --workers=1 --retries=0
+      - run: npx playwright install --with-deps ${{ matrix.engine }}
+      - run: |
+          if [ "${{ matrix.engine }}" = "chromium" ]; then
+            npx playwright test pdf-links.test.ts render-recovery.test.ts document-retirement.test.ts --project=chromium --project=tablet --project=mobile --workers=2 --retries=0
+          elif [ "${{ matrix.engine }}" = "webkit" ]; then
+            npx playwright test pdf-links.test.ts render-recovery.test.ts document-retirement.test.ts --project=webkit --project=mobile-webkit --workers=1 --retries=0
+          else
+            npx playwright test pdf-links.test.ts render-recovery.test.ts document-retirement.test.ts --project=firefox --workers=2 --retries=0
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: leafspace-pdf-link-baseline
+          name: leafspace-pdf-links-${{ matrix.engine }}
           path: |
             playwright-report/
             test-results/
