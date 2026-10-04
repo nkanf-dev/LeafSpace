@@ -33,18 +33,58 @@ Both images are flattened onto white and identically resized using Sharp.
 For each pixel, ink is `255 - grayscale`; each cell's error is
 `sum(abs(actualInk - referenceInk)) / sum(actualInk + referenceInk)`.
 
-This measures glyph stroke shape, not nonwhite pixels or whole-page similarity.
-White output scores 1, regardless of surrounding whitespace. All 16 glyphs must
-score below 0.40 and their mean below 0.28. Independent synthetic Node raster
-calibration at 240 px gave path-render errors averaging 0.067 (worst 0.128),
-versus broken unregistered FontFace output averaging 0.768 (worst 0.857), against
-the direct 240 px Poppler render. Resizing the safe path/registered probes to
-170 px and encoding WebP at quality 80 against the downsampled 1000 px oracle
-produced means 0.064–0.079 and worst cells 0.090–0.104. The broken route remained
-above 0.65 mean. Thresholds allow antialiasing and lossy WebP differences while
-rejecting the observed tofu failure by a wide margin. Browser execution remains
-necessary to validate platform-specific behavior; Node calibration is not an
-E2E pass.
+The test-only helper permits bounded rasterizer registration: ±1 comparison-image pixel
+per axis (native at 170 px for thumbnails; downsampled to 240 px for readers), evaluated at 0.5 px steps with bilinear sampling. It shifts either the
+observed image or the reference, never both, and takes the lower error. This
+symmetric comparison handles a true half-pixel displacement without
+interpolating an already antialiased image twice. No blur, rotation, scale search,
+or unbounded alignment is permitted. All 16 glyphs still must score below 0.40,
+and their mean below 0.28. These original shape limits are unchanged.
+
+A separate identity safeguard compares every cell to all 15 other distinct
+reference glyphs with exactly the same bounded alignment and cell-size mapping.
+The expected glyph must be no more than 0.01 worse than its closest alternative.
+That is an engineering ambiguity margin for near-tied tiny glyphs, not a derived
+8-bit quantization bound. One WebKit DOM cell (體) has a 0.00178 near-tie with 测;
+all 240 deliberately wrong single-cell substitutions have a gap of at least
+0.17126, over 17 times the allowance. This supplementary check rejects a wrong
+glyph even if its ink density passes the shape limits.
+
+### Recorded cross-engine calibration
+
+The initial, unregistered metric incorrectly rejected readable Chromium DOM
+thumbnail strokes (mean 0.32176, worst 0.53160). Visual inspection and registration
+show subpixel placement/hinting differences, not the observed tofu failure.
+The corrected helper was replayed against all 18 first-attempt positive pixel
+attachments from the six-project CI run. Mean / worst cell errors were:
+
+| Project | Reader | Worker thumbnail | DOM thumbnail |
+| --- | --- | --- | --- |
+| Chromium | 0.10272 / 0.20423 | 0.11450 / 0.16668 | 0.16790 / 0.23429 |
+| Tablet | 0.10272 / 0.20423 | 0.11450 / 0.16668 | 0.16790 / 0.23429 |
+| Mobile Chromium | 0.12669 / 0.18679 | 0.11450 / 0.16668 | 0.16790 / 0.23429 |
+| Firefox | 0.09156 / 0.15853 | 0.11443 / 0.16095 | 0.15550 / 0.21509 |
+| WebKit | 0.05174 / 0.10111 | 0.15241 / 0.17866 | 0.21743 / 0.25679 |
+| Mobile WebKit | 0.05173 / 0.09521 | 0.15241 / 0.17866 | 0.21743 / 0.25679 |
+
+All recorded positives meet the unchanged shape limits and the identity check.
+Artifact replay validates the helper on those captured bytes; it is not a new
+browser run. The raw image attachments and per-glyph error JSON remain the E2E
+diagnostics.
+
+### Negative controls
+
+Focused unit tests use the committed independent Poppler oracle and the exact
+same helper. They accept bounded ±0.5 px placement and +1 px placement, and reject
+blank pixels, synthetic tofu outlines, one real glyph repeated across the page,
+all 240 single-cell substitutions with another fixture glyph, and 2/3 px diagonal
+displacement beyond the registration bound. Read-only calibration of the original
+safe synthetic unregistered-FontFace failure still gives 0.54823 mean / 0.59473
+worst; white gives 1 / 1; repeated 中 gives 0.32066 / 0.42733; 2 px displacement
+0.40453 / 0.52491; and 3 px displacement 0.49127 / 0.65188. A +0.5 px diagonal
+positive control is approximately 0.004 / 0.005, with all identities correct.
+This is stroke-shape testing with explicit negative controls, not a nonwhite
+pixel assertion or a page-whitespace-dominated comparison.
 
 The custom-worker case requires a matching successful 170 × 102 worker message,
 no worker errors, and zero DOM WebP encodes. Forced fallback requires blocked

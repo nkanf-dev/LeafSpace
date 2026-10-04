@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { Locator, Page, TestInfo } from '@playwright/test';
 import sharp from 'sharp';
 import { test, expect, importBook, reader, quickFlip } from './helpers';
+import { CJK_LIMITS as limits, CJK_IDENTITY_EPSILON, compareCjkGlyphs } from '../helpers/cjkGlyphMetrics';
 
 const fixturePath = (name: string) => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
 const embedded = fixturePath('embedded-cjk-identity-h.pdf');
@@ -14,8 +15,6 @@ const nonembedded = fixturePath('nonembedded-cjk-unigb.pdf');
 const golden = readFileSync(fixturePath('embedded-cjk-poppler-1000.png'));
 const pdfjsRoot = dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json'));
 const version = JSON.parse(readFileSync(join(pdfjsRoot, 'package.json'), 'utf8')).version as string;
-const glyphRows = ['中文汉字页境测试', '简体繁體縮圖预览'];
-const limits = { mean: 0.28, worst: 0.40 };
 
 type FontEvidence = {
   customCreated: number;
@@ -111,26 +110,7 @@ async function glyphErrors(png: Buffer) {
   const normalize = (input: Buffer) => sharp(input).flatten({ background: 'white' })
     .resize(width, height).greyscale().raw().toBuffer();
   const [actual, expected] = await Promise.all([normalize(png), normalize(golden)]);
-  const glyphs = glyphRows.flatMap((text, row) => Array.from(text, (glyph, column) => {
-    // Original page coordinates: 32pt full-width glyphs, x=50, baselines=280/210.
-    // Each cell contains the full glyph and a small vertical margin, not the
-    // mostly white page. Normalize by ink, so white/tofu cannot be a success.
-    const left = Math.floor((50 + column * 32) * width / 600);
-    const right = Math.floor((50 + (column + 1) * 32) * width / 600);
-    const top = Math.floor((42.5 + row * 70) * width / 600);
-    const bottom = Math.ceil((95 + row * 70) * width / 600);
-    let difference = 0, ink = 0, referenceInk = 0;
-    for (let y = top; y < bottom; y++) for (let x = left; x < right; x++) {
-      const index = y * width + x;
-      const observed = 255 - actual[index], reference = 255 - expected[index];
-      difference += Math.abs(observed - reference);
-      ink += observed + reference;
-      referenceInk += reference;
-    }
-    expect(referenceInk, `The independent oracle contains ${glyph}`).toBeGreaterThan(255);
-    return { glyph, row, error: ink ? difference / ink : 1 };
-  }));
-  return { width, height, glyphs, mean: glyphs.reduce((sum, item) => sum + item.error, 0) / glyphs.length, worst: Math.max(...glyphs.map(item => item.error)) };
+  return compareCjkGlyphs({ pixels: actual, width, height }, { pixels: expected, width, height });
 }
 
 async function expectCjkGlyphs(element: Locator, label: string, info: TestInfo) {
@@ -141,6 +121,7 @@ async function expectCjkGlyphs(element: Locator, label: string, info: TestInfo) 
   expect(errors.mean, `${label}: average CJK shape error against independent Poppler`).toBeLessThan(limits.mean);
   for (const item of errors.glyphs) {
     expect(item.error, `${label}: row ${item.row + 1} glyph ${item.glyph} retains its strokes`).toBeLessThan(limits.worst);
+    expect(item.identityMargin, `${label}: ${item.glyph} must be within ${CJK_IDENTITY_EPSILON} of closest template ${item.nearestOther.glyph}`).toBeGreaterThanOrEqual(-CJK_IDENTITY_EPSILON);
   }
 }
 
