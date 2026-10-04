@@ -25,6 +25,9 @@ interface Props {
 }
 
 type InteractionMode = 'grab' | 'pointer';
+type RenderContext = { documentUrl: string | null; sessionId: number; windowId?: string; activePage: number; scale: number; pageWidth: number };
+type RenderToken = RenderContext & { attempt: number };
+type RenderFeedback = { kind: 'failed'; token: RenderToken } | { kind: 'retrying'; context: RenderContext; attempt: number } | null;
 type PaperPoint = { x: number; y: number };
 type ZoomAnchor = {
   point: PaperPoint;
@@ -40,6 +43,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     canvas?.getContext('2d', { alpha: false, willReadFrequently: true });
   }, []);
   const documentUrl = useBookStore(state => state.documentUrl);
+  const sessionId = useBookStore(state => state.sessionId);
   const globalCurrentPage = useBookStore(state => state.currentPage);
   const globalScale = useBookStore(state => state.scale);
   const totalPages = useBookStore(state => state.totalPages);
@@ -62,6 +66,8 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   const requestedScale = useRef(scale);
   useLayoutEffect(() => { requestedScale.current = scale; }, [scale]);
   const [mode, setMode] = useState<InteractionMode>(storedMode);
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const requestedAttempt = useRef(0);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const contentFrameRef = useRef<HTMLDivElement>(null);
@@ -75,8 +81,34 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   const panHasScrolled = useRef({ left: false, top: false });
   const lastAppliedScroll = useRef({ left: 0, top: 0 });
   const renderGeneration = useRef(0);
-  const renderToken = useMemo(() => ({ documentUrl, activePage, scale, pageWidth }), [documentUrl, activePage, scale, pageWidth]);
-  const currentRenderToken = useRef(renderToken);
+  const renderContext = useMemo(() => ({ documentUrl, sessionId, windowId, activePage, scale, pageWidth }), [documentUrl, sessionId, windowId, activePage, scale, pageWidth]);
+  const renderToken = useMemo(() => ({ ...renderContext, attempt: retryAttempt }), [renderContext, retryAttempt]);
+  const currentRenderToken = useRef<RenderToken | null>(renderToken);
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      currentRenderToken.current = null;
+      renderGeneration.current += 1;
+    };
+  }, []);
+  const [renderFeedback, setRenderFeedback] = useState<RenderFeedback>(null);
+  const showRenderFailure = renderFeedback?.kind === 'failed' && renderFeedback.token === renderToken;
+  const showRenderRetry = renderFeedback?.kind === 'retrying' && renderFeedback.context === renderContext && renderFeedback.attempt === retryAttempt;
+  const retryButtonRef = useRef<HTMLButtonElement | null>(null);
+  const setRetryButton = useCallback((button: HTMLButtonElement | null) => {
+    const previous = retryButtonRef.current;
+    retryButtonRef.current = button;
+    const container = containerRef.current;
+    // A context change can remove a focused Retry without a click. Only recover
+    // focus it still owns; never pull it from another pane, modal, or control.
+    if (!button && previous === document.activeElement && mounted.current && container?.isConnected
+      && container.clientWidth && container.clientHeight && !container.closest('[inert]')
+      && useBookStore.getState().status === 'ready' && useWindowStore.getState().activeWindowId === (windowId ?? 'main')) {
+      container.focus({ preventScroll: true });
+    }
+  }, [windowId]);
   const renderReady = useRef(false);
   const viewportRef = useRef(currentWindow?.viewport);
   const publishingViewport = useRef<ViewportState | null>(null);
@@ -303,13 +335,14 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   }, [currentWindow?.viewport, restoreScroll]);
 
   const handleRenderSuccess = useCallback(() => {
-    if (renderToken !== currentRenderToken.current || renderToken.scale !== requestedScale.current) return;
+    if (renderToken !== currentRenderToken.current || renderToken.scale !== requestedScale.current || renderToken.attempt !== requestedAttempt.current) return;
+    setRenderFeedback(null);
     const generation = renderGeneration.current;
     updateContentAlignment();
     if (zoomCorrectionFrame.current !== null) window.cancelAnimationFrame(zoomCorrectionFrame.current);
     zoomCorrectionFrame.current = window.requestAnimationFrame(() => {
       zoomCorrectionFrame.current = null;
-      if (generation !== renderGeneration.current || renderToken !== currentRenderToken.current || renderToken.scale !== requestedScale.current) return;
+      if (generation !== renderGeneration.current || renderToken !== currentRenderToken.current || renderToken.scale !== requestedScale.current || renderToken.attempt !== requestedAttempt.current) return;
       captureScrollIntent();
       if (!containerRef.current?.clientWidth || !containerRef.current.clientHeight) {
         // A hidden mobile pane has no meaningful zoom geometry. Preserve its
@@ -328,6 +361,33 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
       }
     });
   }, [applyZoomPivot, cancelZoom, captureScrollIntent, persistViewport, renderToken, restoreScroll, updateContentAlignment]);
+
+  const handleRenderError = useCallback(() => {
+    if (renderToken !== currentRenderToken.current || renderToken.scale !== requestedScale.current || renderToken.attempt !== requestedAttempt.current) return;
+    captureScrollIntent();
+    cancelPanning();
+    cancelZoom();
+    if (zoomCorrectionFrame.current !== null) window.cancelAnimationFrame(zoomCorrectionFrame.current);
+    zoomCorrectionFrame.current = null;
+    renderReady.current = false;
+    setRenderFeedback({ kind: 'failed', token: renderToken });
+  }, [cancelPanning, cancelZoom, captureScrollIntent, renderToken]);
+
+  const retryPageRender = useCallback(() => {
+    if (renderFeedback?.kind !== 'failed' || renderFeedback.token !== currentRenderToken.current || renderFeedback.token.attempt !== requestedAttempt.current) return;
+    captureScrollIntent();
+    cancelPanning();
+    cancelZoom();
+    if (zoomCorrectionFrame.current !== null) window.cancelAnimationFrame(zoomCorrectionFrame.current);
+    zoomCorrectionFrame.current = null;
+    renderReady.current = false;
+    const attempt = ++requestedAttempt.current;
+    // Supersede old callbacks now, not only after React commits the new Page.
+    currentRenderToken.current = null;
+    containerRef.current?.focus({ preventScroll: true });
+    setRenderFeedback({ kind: 'retrying', context: renderContext, attempt });
+    setRetryAttempt(attempt);
+  }, [cancelPanning, cancelZoom, captureScrollIntent, renderContext, renderFeedback]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -393,10 +453,10 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   }, [cancelPanning, cancelZoom, zoomAt]);
 
   const handlePageLoad = useCallback((page: PDFPageProxy) => {
-    if (currentRenderToken.current.documentUrl !== documentUrl || currentRenderToken.current.activePage !== activePage || page.pageNumber !== activePage) return;
+    if (currentRenderToken.current?.documentUrl !== documentUrl || currentRenderToken.current.sessionId !== sessionId || currentRenderToken.current.activePage !== activePage || page.pageNumber !== activePage) return;
     const viewport = page.getViewport({ scale: 1 });
     setPageGeometry({ documentUrl, page: activePage, ratio: viewport.height / viewport.width });
-  }, [activePage, documentUrl]);
+  }, [activePage, documentUrl, sessionId]);
 
   const persistCompletedPan = useCallback(() => {
     const container = containerRef.current;
@@ -559,7 +619,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
 
   useReaderGestures({
     containerRef, frameRef: contentFrameRef, scale, canSwipe: mode === 'grab', isActive: activeWindowId === (windowId ?? 'main'),
-    contextKey: `${documentUrl}:${activePage}:${quickFlipVisible}:${scale}:${mode}`,
+    contextKey: `${sessionId}:${windowId}:${documentUrl}:${activePage}:${retryAttempt}:${quickFlipVisible}:${scale}:${mode}`,
     onActivate: () => { cancelZoom(); handleViewportFocus(); },
     getPaperBounds: () => paperBounds(renderReady.current),
     onTurn: direction => updateActivePage(activePage + direction),
@@ -611,7 +671,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   }, [activePage, holdPage, totalPages, updateActivePage]);
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--surface)]" onFocusCapture={handleViewportFocus} onPointerDownCapture={handleViewportFocus}>
+    <div data-reader-shell className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--surface)]" onFocusCapture={handleViewportFocus} onPointerDownCapture={handleViewportFocus}>
       <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2 py-1 sm:px-4">
         <div className="flex items-center gap-3">
           <div className="flex bg-[#f0ede9] p-[2px]">
@@ -638,52 +698,67 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
         </div>
       </div>
 
-      <div 
-        ref={containerRef}
-        tabIndex={0}
-        role="region"
-        aria-label={isMain ? '主阅读区' : `参考阅读区，第 ${activePage} 页`}
-        className={`flex min-h-0 min-w-0 flex-1 overflow-auto bg-[#edece9] ${mode === 'grab' ? 'select-none' : 'select-text'}`}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={stopPanning}
-        onMouseLeave={stopPanning}
-        onFocus={handleViewportFocus}
-        onMouseDownCapture={handleViewportFocus}
-        onKeyDown={handleViewportKeyDown}
-        onScroll={handleScroll}
-        style={{ cursor: mode === 'grab' ? (isPanning ? 'grabbing' : 'grab') : 'default', overflowAnchor: 'none', overflowY: 'scroll', touchAction: mode === 'grab' && shouldCenterHorizontally ? 'pan-y' : 'pan-x pan-y' }}
-      >
+      <div className="relative isolate flex min-h-0 min-w-0 flex-1">
         <div
-          className="flex h-max min-h-full w-fit min-w-full shrink-0 px-4 py-6 sm:px-10 sm:py-[60px]"
+          ref={containerRef}
+          tabIndex={0}
+          role="region"
+          aria-label={isMain ? '主阅读区' : `参考阅读区，第 ${activePage} 页`}
+          className={`flex min-h-0 min-w-0 flex-1 overflow-auto bg-[#edece9] ${mode === 'grab' ? 'select-none' : 'select-text'}`}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={stopPanning}
+          onMouseLeave={stopPanning}
+          onFocus={handleViewportFocus}
+          onMouseDownCapture={handleViewportFocus}
+          onKeyDown={handleViewportKeyDown}
+          onScroll={handleScroll}
+          style={{ cursor: mode === 'grab' ? (isPanning ? 'grabbing' : 'grab') : 'default', overflowAnchor: 'none', overflowY: 'scroll', touchAction: mode === 'grab' && shouldCenterHorizontally ? 'pan-y' : 'pan-x pan-y' }}
         >
-          <div ref={contentFrameRef} className="m-auto w-max shrink-0"
-            style={paperRatio ? { width: Math.floor(pageWidth * scale) + 2, height: Math.floor(pageWidth * scale * paperRatio) + 2 } : undefined}>
-            {file ? (
-              <Document
-                file={file}
-                options={options}
-                error={<div role="alert" className="max-w-xs p-6 text-sm text-red-800">页面暂时无法显示，请重新导入这本 PDF。</div>}
-                loading={<div role="status" className="mt-24 text-sm italic text-stone-500" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>正在渲染...</div>}
-              >
-                <Page
-                  canvasRef={initializeCanvas}
-                  pageNumber={activePage}
-                  width={pageWidth}
-                  scale={scale}
-                  className="border border-[#e0ddd5] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.05),0_30px_100px_rgba(0,0,0,0.1)]"
-                  renderTextLayer={true}
-                  onLoadSuccess={handlePageLoad}
-                  onRenderSuccess={handleRenderSuccess}
-                  loading={<div role="status" className="p-6 text-sm text-stone-500">正在渲染页面…</div>}
-                  error={<div role="alert" className="p-6 text-sm text-red-800">这一页无法渲染，请试试其他页面或重新导入。</div>}
-                />
-              </Document>
-            ) : (
-              <div className="mt-24 text-sm text-stone-500">等待载入...</div>
-            )}
+          <div
+            className="flex h-max min-h-full w-fit min-w-full shrink-0 px-4 py-6 sm:px-10 sm:py-[60px]"
+          >
+            <div ref={contentFrameRef} className="m-auto w-max shrink-0"
+              style={paperRatio ? { width: Math.floor(pageWidth * scale) + 2, height: Math.floor(pageWidth * scale * paperRatio) + 2 } : undefined}>
+              {file ? (
+                <Document
+                  file={file}
+                  options={options}
+                  error={<div role="alert" className="max-w-xs p-6 text-sm text-red-800">页面暂时无法显示，请重新导入这本 PDF。</div>}
+                  loading={<div role="status" className="mt-24 text-sm italic text-stone-500" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>正在渲染...</div>}
+                >
+                  <Page
+                    key={`${sessionId}:${windowId ?? 'main'}:${retryAttempt}`}
+                    canvasRef={initializeCanvas}
+                    pageNumber={activePage}
+                    width={pageWidth}
+                    scale={scale}
+                    className="border border-[#e0ddd5] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.05),0_30px_100px_rgba(0,0,0,0.1)]"
+                    renderTextLayer={true}
+                    onLoadSuccess={handlePageLoad}
+                    onRenderSuccess={handleRenderSuccess}
+                    onRenderError={handleRenderError}
+                    loading={<div role="status" className="p-6 text-sm text-stone-500">正在渲染页面…</div>}
+                    error={<div role="alert" className="p-6 text-sm text-red-800">这一页无法渲染，请试试其他页面或重新导入。</div>}
+                  />
+                </Document>
+              ) : (
+                <div className="mt-24 text-sm text-stone-500">等待载入...</div>
+              )}
+            </div>
           </div>
         </div>
+        {(showRenderFailure || showRenderRetry) && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-3">
+            <div role={showRenderFailure ? 'alert' : 'status'} className="pointer-events-auto max-h-full min-h-0 w-full max-w-sm overflow-auto border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-stone-800 shadow-sm">
+              {showRenderFailure ? <>
+                <p className="font-medium">第 {activePage} 页暂时无法显示</p>
+                <p className="mt-2 leading-relaxed text-stone-600">可以重试这一页，或先阅读其他页面</p>
+                <button ref={setRetryButton} type="button" className="mt-3 min-h-10 border border-[var(--border)] bg-white px-3 py-2 text-stone-900 hover:bg-stone-100" onClick={retryPageRender}>重试此页</button>
+              </> : <p>正在重试第 {activePage} 页…</p>}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

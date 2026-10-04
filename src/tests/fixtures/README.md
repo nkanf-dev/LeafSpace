@@ -2,6 +2,8 @@
 
 These PDFs are generated in this repository and contain no personal, licensed, or external document content. They have real page trees, content streams, xref tables, and numbered or raster-image pages so Playwright exercises PDF.js parsing and rendering rather than mocked canvases.
 
+`leafspace-render-recovery.pdf` is a two-page 256×256 RGB raster control with red, green and white regions, small page labels and same-page internal link annotations. The full-page link exercises real PDF layer stacking above a rejected canvas. It contains no external URI, JavaScript, form or password. Regenerate with `node src/tests/fixtures/generate-render-recovery.mjs`; only Node built-ins are required. SHA-256: `be360fdfe93a8fea06be086c10f600ec30439905d4f58ef054151d051f780eda`.
+
 - `leafspace-12-pages.pdf`: 12 portrait pages, distinctive page numbers and green bars
 - `leafspace-other-book.pdf`: a separate four-page document with a distinct fingerprint
 - `leafspace-120-pages.pdf`: long numbered book with a nested three-entry PDF outline

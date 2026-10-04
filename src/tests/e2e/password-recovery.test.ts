@@ -58,12 +58,12 @@ for (const kind of ['protected', 'corrupt'] as const) {
   test(`${kind} replacement keeps the local PDF and full reading context recoverable from recents`, async ({ page }, info) => {
     test.skip(info.project.name === 'mobile' || info.project.name === 'mobile-webkit' || info.project.name === 'tablet', 'Multi-pane context is checked on desktop; compact imports are covered separately.');
     await page.goto('/'); await importBook(page); await navigateTo(page, 6);
-    await reader(page).locator('..').getByRole('button', { name: '放大', exact: true }).click();
+    await reader(page).locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '放大', exact: true }).click();
     await holdCurrentPage(page, 6);
     await page.getByRole('button', { name: '打开第 6 页参考窗口', exact: true }).click();
     await page.locator('[data-floating-window]').getByRole('button', { name: '吸附', exact: true }).click();
     const reference = page.getByRole('region', { name: '参考阅读区，第 6 页', exact: true });
-    for (let step = 0; step < 3; step++) await reference.locator('..').getByRole('button', { name: '放大', exact: true }).click();
+    for (let step = 0; step < 3; step++) await reference.locator('xpath=ancestor::*[@data-reader-shell][1]').getByRole('button', { name: '放大', exact: true }).click();
     await expect(reference.locator('canvas')).toBeVisible();
     await reference.evaluate(element => element.scrollTo(30, 120));
     await reader(page).focus();
@@ -89,8 +89,8 @@ for (const kind of ['protected', 'corrupt'] as const) {
     await page.getByRole('button', { name: /leafspace-12-pages\.pdf/ }).click();
     await expectMainPage(page, 7);
     await expect(reference.locator('canvas')).toBeVisible();
-    await expect(reader(page).locator('..').getByText('120%', { exact: true })).toBeVisible();
-    await expect(reference.locator('..').getByText('173%', { exact: true })).toBeVisible();
+    await expect(reader(page).locator('xpath=ancestor::*[@data-reader-shell][1]').getByText('120%', { exact: true })).toBeVisible();
+    await expect(reference.locator('xpath=ancestor::*[@data-reader-shell][1]').getByText('173%', { exact: true })).toBeVisible();
     await expect.poll(() => reference.evaluate(element => element.scrollTop)).toBe(120);
     await expect.poll(() => reference.evaluate(element => element.scrollLeft)).toBe(30);
     await expect(page.getByRole('button', { name: '打开第 6 页参考窗口', exact: true })).toBeVisible();
