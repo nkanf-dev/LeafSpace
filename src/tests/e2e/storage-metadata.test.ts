@@ -117,11 +117,12 @@ async function seedLegacyBook(page: Page, format: 'bytes' | 'blob') {
 
 async function installStorageProbe(page: Page, failure?: 'schema' | 'metadata') {
   await page.addInitScript(({ failure }) => {
-    const state = { failure, enabled: true, assetReads: 0, assetWrites: 0 };
+    const state = { failure, enabled: true, assetReads: 0, assetWrites: 0, workspaceWrites: 0, workspaceCommits: 0 };
     Object.assign(window, { leafspaceMetadataProbe: state });
     const put = IDBObjectStore.prototype.put;
     IDBObjectStore.prototype.put = function (...args) {
       if (this.name === 'books') state.assetWrites++;
+      if (this.name === 'workspaces') state.workspaceWrites++;
       if (state.enabled && state.failure === 'metadata' && this.name === 'bookMetadata') throw new DOMException('Synthetic metadata quota exceeded', 'QuotaExceededError');
       return put.apply(this, args);
     };
@@ -144,11 +145,32 @@ async function installStorageProbe(page: Page, failure?: 'schema' | 'metadata') 
       if (state.enabled && state.failure === 'schema' && name === 'bookMetadata') throw new DOMException('Synthetic schema quota exceeded', 'QuotaExceededError');
       return create.call(this, name, options);
     };
+    const transaction = IDBDatabase.prototype.transaction;
+    IDBDatabase.prototype.transaction = function (...args) {
+      const result = transaction.apply(this, args);
+      if (result.mode === 'readwrite' && result.objectStoreNames.contains('workspaces')) {
+        result.addEventListener('complete', () => { state.workspaceCommits++; });
+      }
+      return result;
+    };
   }, { failure });
 }
 
 async function probe(page: Page) {
-  return page.evaluate(() => (window as unknown as { leafspaceMetadataProbe: { assetReads: number; assetWrites: number } }).leafspaceMetadataProbe);
+  return page.evaluate(() => (window as unknown as { leafspaceMetadataProbe: { assetReads: number; assetWrites: number; workspaceWrites: number; workspaceCommits: number } }).leafspaceMetadataProbe);
+}
+
+async function metadataRows(page: Page) {
+  return page.evaluate(() => new Promise<unknown[] | null>((resolve, reject) => {
+    const opening = indexedDB.open('leafspace'); opening.onerror = () => reject(opening.error);
+    opening.onsuccess = () => {
+      const db = opening.result;
+      if (!db.objectStoreNames.contains('bookMetadata')) { db.close(); resolve(null); return; }
+      const tx = db.transaction('bookMetadata', 'readonly'), request = tx.objectStore('bookMetadata').getAll();
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+      tx.oncomplete = tx.onabort = () => db.close();
+    };
+  }));
 }
 
 for (const format of ['bytes', 'blob'] as const) {
@@ -211,8 +233,30 @@ for (const failure of ['schema', 'metadata'] as const) {
     await page.getByRole('button', { name: new RegExp(BOOK_NAME) }).click();
     await expectMainPage(page, 7);
     await expect(reader(page).locator('canvas')).toBeVisible();
+    const before = (await snapshots(page))[0];
+    const beforeMetadata = await metadataRows(page), beforeCommits = (await probe(page)).workspaceCommits;
     await page.getByRole('button', { name: '保存现场', exact: true }).click();
-    await expect(page.getByRole('alert')).toBeVisible();
+    let beforeChanged: Awaited<ReturnType<typeof probe>> | undefined;
+    if (failure === 'metadata') {
+      // A truly unchanged scene is a successful no-op. Optional legacy-sidecar
+      // hydration may still try metadata, but cannot rewrite the workspace/PDF.
+      await expect.poll(async () => (await probe(page)).workspaceCommits).toBeGreaterThan(beforeCommits);
+      await expect(page.getByText('已保存到本机', { exact: true })).toBeVisible();
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      expect((await probe(page)).workspaceWrites).toBe(0); expect((await snapshots(page))[0]).toEqual(before);
+      // A real reading edit still exercises joint snapshot/sidecar failure.
+      beforeChanged = await probe(page);
+      await page.getByRole('button', { name: '选择文字', exact: true }).click();
+      await page.getByRole('button', { name: '保存现场', exact: true }).click();
+    }
+    await expect(page.getByRole('alert')).toContainText(`Synthetic ${failure} quota exceeded`);
+    if (beforeChanged) {
+      const afterChanged = await probe(page);
+      expect(afterChanged.workspaceWrites).toBeGreaterThan(beforeChanged.workspaceWrites);
+      expect(afterChanged.workspaceCommits).toBe(beforeChanged.workspaceCommits);
+    }
+    expect((await snapshots(page))[0]).toEqual(before);
+    expect(await metadataRows(page)).toEqual(beforeMetadata);
     expect((await probe(page)).assetWrites).toBe(0);
     await info.attach(`${failure}-before-readback-screen`, { body: await page.screenshot(), contentType: 'image/png' });
     await expect(reader(page).locator('canvas')).toBeVisible();
@@ -248,6 +292,7 @@ for (const failure of ['schema', 'metadata'] as const) {
     await page.getByRole('button', { name: '回到书库', exact: true }).click();
     await page.getByRole('button', { name: new RegExp(BOOK_NAME) }).click();
     await expectMainPage(page, 7);
+    await expect(page.getByRole('button', { name: '选择文字', exact: true })).toHaveAttribute('aria-pressed', 'true');
     expect((await probe(page)).assetWrites).toBe(0);
   });
 }

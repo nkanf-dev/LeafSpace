@@ -21,7 +21,7 @@ function track(promise: Promise<void>) { pending.push(promise); return promise; 
 function ready() { bookStore.getState().setDocumentReady({ documentId: 'fixture', totalPages: 20 }); }
 function dependencies() {
   const service = new PersistenceService();
-  const save = vi.spyOn(service, 'saveWorkspace').mockResolvedValue(undefined);
+  const save = vi.spyOn(service, 'saveWorkspace').mockImplementation(async snapshot => snapshot);
   const register = vi.spyOn(service, 'saveBookAsset').mockResolvedValue(undefined);
   vi.spyOn(service, 'loadWorkspace').mockResolvedValue(null);
   const recent = vi.spyOn(service, 'listRecentBooks').mockResolvedValue([]);
@@ -63,7 +63,7 @@ describe('session-owned exit state', () => {
 
   it('does not bless edits made while the captured snapshot is being written', async () => {
     const { save } = await initial(); const write = deferred();
-    save.mockImplementationOnce(() => write.promise);
+    save.mockImplementationOnce(snapshot => write.promise.then(() => snapshot));
     bookStore.getState().setCurrentPage(2);
     const saving = track(workspaceStore.getState().saveWorkspace('fixture'));
     await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
@@ -79,7 +79,7 @@ describe('session-owned exit state', () => {
 
   it('keeps a queued edit guarded even if the live reader returns to the old baseline', async () => {
     const { save } = await initial(); const write = deferred();
-    save.mockImplementationOnce(() => write.promise);
+    save.mockImplementationOnce(snapshot => write.promise.then(() => snapshot));
     bookStore.getState().setCurrentPage(2);
     const saving = track(workspaceStore.getState().saveWorkspace('fixture'));
     bookStore.getState().setCurrentPage(1);
@@ -92,7 +92,7 @@ describe('session-owned exit state', () => {
 
   it('advances the older durable baseline without clearing a newer queued request or its failure', async () => {
     const { save } = await initial(); const firstWrite = deferred(), secondWrite = deferred();
-    save.mockImplementationOnce(() => firstWrite.promise).mockImplementationOnce(() => secondWrite.promise);
+    save.mockImplementationOnce(snapshot => firstWrite.promise.then(() => snapshot)).mockImplementationOnce(snapshot => secondWrite.promise.then(() => snapshot));
     bookStore.getState().setCurrentPage(2);
     const first = track(workspaceStore.getState().saveWorkspace('fixture'));
     await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
@@ -146,7 +146,7 @@ describe('session-owned exit state', () => {
 
   it('clears confirmed PDF ownership even when a queued snapshot has advanced request generation', async () => {
     const { register, save } = await initial(); const assetWrite = deferred(), snapshotWrite = deferred();
-    register.mockImplementationOnce(() => assetWrite.promise); save.mockImplementationOnce(() => snapshotWrite.promise);
+    register.mockImplementationOnce(() => assetWrite.promise); save.mockImplementationOnce(snapshot => snapshotWrite.promise.then(() => snapshot));
     const registration = track(workspaceStore.getState().registerCurrentBook(new File(['asset'], 'asset.pdf')));
     await vi.waitFor(() => expect(register).toHaveBeenCalledOnce());
     const saving = track(workspaceStore.getState().saveWorkspace('fixture'));
@@ -181,7 +181,7 @@ describe('session-owned exit state', () => {
 
   it('does not publish an old same-fingerprint write into the new session baseline or request owner', async () => {
     const { save } = await initial(); const oldWrite = deferred(), newWrite = deferred();
-    save.mockImplementationOnce(() => oldWrite.promise).mockImplementationOnce(() => newWrite.promise);
+    save.mockImplementationOnce(snapshot => oldWrite.promise.then(() => snapshot)).mockImplementationOnce(snapshot => newWrite.promise.then(() => snapshot));
     bookStore.getState().setCurrentPage(2);
     const old = track(workspaceStore.getState().saveWorkspace('fixture'));
     await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());

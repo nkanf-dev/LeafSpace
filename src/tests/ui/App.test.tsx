@@ -38,7 +38,7 @@ function setupDependencies() {
   vi.spyOn(pdf, 'getDocumentFingerprint').mockReturnValue('new-book');
   configureBookStoreDependencies({ pdfService: pdf });
   const persistence = new PersistenceService();
-  const save = vi.spyOn(persistence, 'saveWorkspace').mockResolvedValue(undefined);
+  const save = vi.spyOn(persistence, 'saveWorkspace').mockImplementation(async snapshot => snapshot);
   const restore = vi.spyOn(persistence, 'loadWorkspace').mockResolvedValue(null);
   const register = vi.spyOn(persistence, 'saveBookAsset').mockResolvedValue(undefined);
   const recent = vi.spyOn(persistence, 'listRecentBooks').mockResolvedValue([]);
@@ -308,7 +308,7 @@ describe('App document workflows', () => {
     const { save } = setupDependencies(); openExistingBook();
     await workspaceStore.getState().restoreWorkspace('old-book');
     let finish!: () => void;
-    save.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    save.mockImplementationOnce(snapshot => new Promise<void>(resolve => { finish = resolve; }).then(() => snapshot));
     render(<App />);
     let pending!: Promise<void>;
     await act(async () => { pending = workspaceStore.getState().saveWorkspace('old-book'); });
@@ -422,7 +422,7 @@ describe('App document workflows', () => {
   it('flushes the current reading position before starting a replacement import', async () => {
     const { load, save } = setupDependencies();
     let finishSave!: () => void;
-    save.mockImplementationOnce(() => new Promise<void>(resolve => { finishSave = resolve; }));
+    save.mockImplementationOnce(snapshot => new Promise<void>(resolve => { finishSave = resolve; }).then(() => snapshot));
     openExistingBook();
     await heldStore.getState().holdPage(8);
     render(<App />);
@@ -472,7 +472,7 @@ describe('App document workflows', () => {
   it('waits for a successful save before returning to the library', async () => {
     const { save } = setupDependencies();
     let finishSave!: () => void;
-    save.mockImplementationOnce(() => new Promise<void>(resolve => { finishSave = resolve; }));
+    save.mockImplementationOnce(snapshot => new Promise<void>(resolve => { finishSave = resolve; }).then(() => snapshot));
     openExistingBook();
     render(<App />);
     vi.mocked(thumbnailService.releaseDocument).mockClear();
@@ -490,7 +490,7 @@ describe('App document workflows', () => {
   it('freezes transition input and flushes a late reading revision before leaving', async () => {
     const { save } = setupDependencies();
     let finishSave!: () => void;
-    save.mockImplementationOnce(() => new Promise<void>(resolve => { finishSave = resolve; }));
+    save.mockImplementationOnce(snapshot => new Promise<void>(resolve => { finishSave = resolve; }).then(() => snapshot));
     openExistingBook();
     const reference = windowStore.getState().openInNewWindow(12);
     render(<App />);
@@ -533,7 +533,7 @@ describe('App document workflows', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '重试保存' })));
     expect(register).toHaveBeenCalledTimes(2);
     expect(register.mock.lastCall?.[0]).toMatchObject({ documentId: 'new-book', file });
-    expect(save).toHaveBeenCalledWith(expect.objectContaining({ documentId: 'new-book', currentPage: 9 }));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ documentId: 'new-book', currentPage: 9 }), null);
     expect(workspaceStore.getState().error).toBeNull();
     expect(screen.getByText('已保存到本机')).toBeInTheDocument();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '回到书库' })));
@@ -587,7 +587,7 @@ describe('App document workflows', () => {
     const { restore, save } = setupDependencies();
     restore.mockRejectedValueOnce(new Error('Temporary storage read failure'));
     let finishSave!: () => void;
-    save.mockImplementationOnce(() => new Promise<void>(resolve => { finishSave = resolve; }));
+    save.mockImplementationOnce(snapshot => new Promise<void>(resolve => { finishSave = resolve; }).then(() => snapshot));
     openExistingBook();
     await workspaceStore.getState().restoreWorkspace('old-book');
     render(<App />);
@@ -600,6 +600,25 @@ describe('App document workflows', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '回到书库' })).toBeEnabled();
     expect(workspaceStore.getState()).toMatchObject({ status: 'idle', error: null, unrestoredDocumentId: null });
+  });
+
+  it('offers a fresh replacement confirmation after comparison reads fail, preserving live edits until retry succeeds', async () => {
+    const { restore, save } = setupDependencies(); openExistingBook();
+    restore.mockRejectedValue(new Error('Comparison read unavailable'));
+    await workspaceStore.getState().restoreWorkspace('old-book');
+    useBookStore.getState().setCurrentPage(3); render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '保存现场' }));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '覆盖上次现场' })));
+    expect(save).not.toHaveBeenCalled(); expect(useBookStore.getState().currentPage).toBe(3);
+    expect(screen.getByRole('alert')).toHaveTextContent('Comparison read unavailable'); expect(beforeUnloadIsBlocked()).toBe(true);
+    restore.mockResolvedValue(null);
+    fireEvent.click(screen.getByRole('button', { name: '重新确认覆盖' }));
+    expect(screen.getByRole('group', { name: '确认替换上次现场' })).toBeInTheDocument(); expect(save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '取消覆盖' })); expect(useBookStore.getState().currentPage).toBe(3);
+    fireEvent.click(screen.getByRole('button', { name: '重新确认覆盖' }));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '覆盖上次现场' })));
+    expect(save).toHaveBeenCalledOnce(); expect(useBookStore.getState().currentPage).toBe(3);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument(); expect(beforeUnloadIsBlocked()).toBe(false);
   });
 
   it('cancels replacement before closing reference windows even after focus leaves the warning', async () => {

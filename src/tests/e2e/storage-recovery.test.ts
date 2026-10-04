@@ -80,7 +80,7 @@ test('failed snapshot reads cannot be overwritten by leaving, importing, or canc
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
-test('explicit replacement of an unread snapshot preserves the current reading context', async ({ page }, testInfo) => {
+test('explicit replacement waits for readable comparison state and preserves current edits through recovery', async ({ page }, testInfo) => {
   await page.goto('/');
   await importBook(page);
   await navigateTo(page, 8);
@@ -94,9 +94,17 @@ test('explicit replacement of an unread snapshot preserves the current reading c
   expect((await snapshots(page))[0].currentPage).toBe(8);
   await testInfo.attach('confirm-workspace-replacement', { body: await page.screenshot(), contentType: 'image/png' });
   await page.getByRole('button', { name: '覆盖上次现场', exact: true }).click();
+  // Approval cannot turn a still-unreadable record into a blind overwrite.
+  await expect(page.getByRole('alert')).toContainText('Synthetic snapshot read unavailable');
+  await expectMainPage(page, 3); expect((await snapshots(page))[0].currentPage).toBe(8);
+  await expect(page.getByRole('button', { name: '重新确认覆盖', exact: true })).toBeVisible();
+  await recoverStorage(page);
+  await page.getByRole('button', { name: '重新确认覆盖', exact: true }).click();
+  await expect(page.getByRole('group', { name: '确认替换上次现场' })).toBeVisible();
+  expect((await snapshots(page))[0].currentPage).toBe(8);
+  await page.getByRole('button', { name: '覆盖上次现场', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect.poll(async () => (await snapshots(page))[0]?.currentPage).toBe(3);
-  await recoverStorage(page);
   await page.getByRole('button', { name: '回到书库' }).click();
   await page.getByRole('button', { name: new RegExp(BOOK_NAME) }).click();
   await expectMainPage(page, 3);

@@ -2,7 +2,7 @@ import { StrictMode, useCallback } from 'react';
 import { act, cleanup, render, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useWorkspaceAutoSave } from '../../hooks/useWorkspaceAutoSave';
-import { PersistenceService } from '../../services/PersistenceService';
+import { PersistenceService, WorkspaceConflictError } from '../../services/PersistenceService';
 import { bookStore, useBookStore } from '../../stores/bookStore';
 import { heldStore, useHeldStore } from '../../stores/heldStore';
 import { windowStore, useWindowStore } from '../../stores/windowStore';
@@ -17,7 +17,7 @@ function liveState(locked = false): ReadingInput {
   const book = bookStore.getState(), workspace = workspaceStore.getState();
   return { documentId: book.documentId, sessionId: book.sessionId, currentPage: book.currentPage, scale: book.scale,
     heldPages: heldStore.getState().pages, windows: windowStore.getState().windows, activeWindowId: windowStore.getState().activeWindowId,
-    enabled: !locked && book.status === 'ready' && workspace.status === 'idle' && workspace.unrestoredDocumentId !== book.documentId };
+    enabled: !locked && book.status === 'ready' && workspace.status === 'idle' && workspace.unrestoredDocumentId !== book.documentId && !workspace.conflict };
 }
 const transition = { current: false };
 function Harness() {
@@ -25,7 +25,7 @@ function Harness() {
   const readCurrent = useCallback(() => liveState(transition.current), []);
   const input = { documentId: book.documentId, sessionId: book.sessionId, currentPage: book.currentPage, scale: book.scale,
     heldPages: held.pages, windows: windows.windows, activeWindowId: windows.activeWindowId,
-    enabled: !transition.current && book.status === 'ready' && workspace.status === 'idle' && workspace.unrestoredDocumentId !== book.documentId,
+    enabled: !transition.current && book.status === 'ready' && workspace.status === 'idle' && workspace.unrestoredDocumentId !== book.documentId && !workspace.conflict,
     currentSnapshot: workspace.currentSnapshot, readCurrent, saveWorkspace: workspace.saveWorkspace };
   useWorkspaceAutoSave(input);
   return null;
@@ -38,7 +38,7 @@ function hide() { hidden = true; document.dispatchEvent(new Event('visibilitycha
 async function prepare() {
   const service = new PersistenceService();
   const written: WorkspaceSnapshot[] = [];
-  const save = vi.spyOn(service, 'saveWorkspace').mockImplementation(async snapshot => { written.push(structuredClone(snapshot)); });
+  const save = vi.spyOn(service, 'saveWorkspace').mockImplementation(async snapshot => { written.push(structuredClone(snapshot)); return snapshot; });
   vi.spyOn(service, 'loadWorkspace').mockResolvedValue(null); vi.spyOn(service, 'listRecentBooks').mockResolvedValue([]);
   configureWorkspaceStoreDependencies({ persistenceService: service });
   bookStore.getState().setDocumentReady({ documentId: 'fixture', totalPages: 20, initialPage: 8 });
@@ -70,7 +70,7 @@ describe('hidden workspace autosave', () => {
   it('corrects a later rollback after an in-flight hidden save succeeds without another debounce', async () => {
     const { save, written } = await prepare(); render(<Harness />); await tick(500);
     const first = deferred();
-    save.mockImplementationOnce(async snapshot => { await first.promise; written.push(structuredClone(snapshot)); });
+    save.mockImplementationOnce(async snapshot => { await first.promise; written.push(structuredClone(snapshot)); return snapshot; });
     act(() => bookStore.getState().setScale(1.5));
     const rollback = () => bookStore.getState().setScale(1);
     document.addEventListener('visibilitychange', rollback);
@@ -160,10 +160,30 @@ describe('hidden workspace autosave', () => {
     },
   );
 
+  it('keeps hidden and debounced saves blocked by conflict ownership even if the status is cleared', async () => {
+    const { save, written } = await prepare(); render(<Harness />); await tick(500);
+    save.mockRejectedValueOnce(new WorkspaceConflictError({ ...written[0], currentPage: 7, revision: 'other-tab' }));
+    act(() => bookStore.getState().setCurrentPage(9));
+    await act(async () => { hide(); });
+    expect(workspaceStore.getState().conflict).not.toBeNull();
+    expect(save).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      workspaceStore.getState().clearError();
+      // The live conflict barrier is independent of error UI status.
+      workspaceStore.setState({ status: 'idle', error: null });
+      bookStore.getState().setCurrentPage(10);
+      hide();
+    });
+    await tick(2_000);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(written.map(snapshot => snapshot.currentPage)).toEqual([8]);
+    expect(bookStore.getState().currentPage).toBe(10);
+  });
+
   it('waits for an in-flight write then immediately saves the newer hidden revision', async () => {
     const { save, written } = await prepare(); render(<Harness />); await tick(500);
     const first = deferred();
-    save.mockImplementationOnce(async snapshot => { await first.promise; written.push(structuredClone(snapshot)); });
+    save.mockImplementationOnce(async snapshot => { await first.promise; written.push(structuredClone(snapshot)); return snapshot; });
     act(() => bookStore.getState().setCurrentPage(9)); await tick(500);
     expect(save).toHaveBeenCalledTimes(2);
     await act(async () => { bookStore.getState().setCurrentPage(10); hide(); });

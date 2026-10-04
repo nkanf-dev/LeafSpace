@@ -23,6 +23,13 @@ function props(overrides: Partial<ComponentProps<typeof HeldPagesPanel>> = {}) {
 }
 
 describe('HeldPagesPanel', () => {
+  it('confines scrolling to its content while its header keeps a fixed row', () => {
+    const { container } = render(<HeldPagesPanel {...props()} />);
+    expect(container.firstElementChild).toHaveClass('min-h-0', 'flex-1', 'overflow-hidden');
+    expect(container.firstElementChild).not.toHaveClass('h-full');
+    expect(screen.getByRole('heading', { name: '夹住的页面 (1)' }).parentElement).toHaveClass('shrink-0');
+  });
+
   it('explains how to hold, read, and compare pages in the empty state', () => {
     render(<HeldPagesPanel {...props({ pages: [] })} />);
     expect(screen.getByRole('heading', { name: '夹住的页面 (0)' })).toBeInTheDocument();

@@ -15,7 +15,7 @@ function blocked() {
 }
 async function initial() {
   const service = new PersistenceService();
-  const save = vi.spyOn(service, 'saveWorkspace').mockResolvedValue(undefined);
+  const save = vi.spyOn(service, 'saveWorkspace').mockImplementation(async snapshot => snapshot);
   const restore = vi.spyOn(service, 'loadWorkspace').mockResolvedValue(null);
   const register = vi.spyOn(service, 'saveBookAsset').mockResolvedValue(undefined); vi.spyOn(service, 'listRecentBooks').mockResolvedValue([]);
   configureWorkspaceStoreDependencies({ persistenceService: service });

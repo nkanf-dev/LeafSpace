@@ -86,4 +86,15 @@ describe('prepared held-page reads', () => {
     expect(read.commit()).toBe(false);
     expect(windowStore.getState().windows.find(window => window.id === reference)?.pageNumber).toBe(5);
   });
+  it.each(['same-page', 'same-scene', 'same-session-source'])('retires a prepared read after an explicit %s replacement', replacement => {
+    const reference = windowStore.getState().openInNewWindow(5);
+    if (replacement === 'same-session-source') windowStore.getState().setActiveWindow('main');
+    const read = prepareHeldRead(8);
+    if (replacement === 'same-page') windowStore.getState().navigateActive(5);
+    if (replacement === 'same-scene') windowStore.getState().restoreWindows(windowStore.getState().windows, reference);
+    if (replacement === 'same-session-source') bookStore.getState().setDocumentReady({ documentId: 'held-intent', documentUrl: 'blob:held-intent', totalPages: 20, initialPage: 3, scale: 1.4 });
+    expect(read.commit()).toBe(false); expect(read.rollback()).toBe(false);
+    expect(windowStore.getState().windows.find(window => window.id === reference)?.pageNumber).toBe(5);
+    expect(bookStore.getState().currentPage).toBe(3);
+  });
 });

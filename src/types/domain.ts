@@ -52,6 +52,8 @@ export interface ReaderWindow {
 }
 
 export interface WorkspaceSnapshot {
+  /** Opaque write identity; absent in legacy snapshots. */
+  revision?: string;
   documentId: string;
   currentPage: number;
   scale: number;

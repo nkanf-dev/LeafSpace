@@ -2,6 +2,27 @@ import Dexie, { type Table } from 'dexie';
 
 import type { RecentBookEntry, WorkspaceSnapshot } from '../types/domain';
 
+// Compare the complete lightweight record as well as its opaque revision. This
+// also detects legacy writers that omit revisions or preserve one while editing.
+export type WorkspaceVersion = string | null;
+export function workspaceVersion(snapshot: WorkspaceSnapshot | null | undefined): WorkspaceVersion {
+  return snapshot ? JSON.stringify(snapshot) : null;
+}
+function workspaceContent(snapshot: WorkspaceSnapshot): string {
+  return JSON.stringify([snapshot.documentId, snapshot.currentPage, snapshot.scale, snapshot.activeWindowId,
+    snapshot.layoutPreset, snapshot.heldPages, snapshot.windows]);
+}
+export class WorkspaceConflictError extends Error {
+  readonly version: WorkspaceVersion;
+  readonly current: WorkspaceSnapshot | null;
+  constructor(current: WorkspaceSnapshot | null) {
+    super('另一个标签页已更改这本书的阅读现场。此页的更改仍保留，已暂停保存和切换。请选择载入已存现场，或明确覆盖；请勿关闭此页。');
+    this.name = 'WorkspaceConflictError';
+    this.current = current;
+    this.version = workspaceVersion(current);
+  }
+}
+
 interface PersistedBookRecord extends RecentBookEntry {
   // Legacy records used Blob/File; bytes avoid WebKit file-backed Blob failures.
   blob?: Blob;
@@ -53,7 +74,7 @@ interface WorkspacePersistencePort {
   getRecentBooks(limit?: number): Promise<RecentBookEntry[]>;
   getWorkspace(documentId: string): Promise<WorkspaceSnapshot | undefined>;
   putBook(record: PersistedBookRecord): Promise<void>;
-  putWorkspace(snapshot: WorkspaceSnapshot): Promise<void>;
+  putWorkspace(snapshot: WorkspaceSnapshot, expectedVersion: WorkspaceVersion): Promise<WorkspaceSnapshot>;
   updateBookMetadata(documentId: string, changes: BookMetadataChanges, source?: RecentBookEntry): Promise<number>;
 }
 
@@ -222,9 +243,21 @@ export class DexieWorkspacePersistencePort extends Dexie implements WorkspacePer
     });
   }
 
-  async putWorkspace(snapshot: WorkspaceSnapshot): Promise<void> {
+  async putWorkspace(snapshot: WorkspaceSnapshot, expectedVersion: WorkspaceVersion): Promise<WorkspaceSnapshot> {
     await this.ensureOpen();
-    await this.workspaces.put(snapshot);
+    // IndexedDB serializes overlapping readwrite transactions across connections
+    // and tabs. The read MUST be in the same transaction as the conditional put.
+    return this.transaction('rw', this.workspaces, this.books, this.bookMetadata, async () => {
+      const current = await this.workspaces.get(snapshot.documentId);
+      if (workspaceVersion(current) !== expectedVersion) throw new WorkspaceConflictError(current ?? null);
+      if (current && workspaceContent(current) === workspaceContent(snapshot)) return current;
+      const saved = { ...snapshot, revision: crypto.randomUUID() };
+      await this.workspaces.put(saved);
+      // Commit bookkeeping with the snapshot: a failed sidecar write must not
+      // advance durable ownership while the caller still believes its save failed.
+      await this.updateBookMetadata(snapshot.documentId, { lastSavedAt: snapshot.savedAt, lastOpenedAt: new Date().toISOString() });
+      return saved;
+    });
   }
 
   async updateBookMetadata(documentId: string, changes: BookMetadataChanges, source?: RecentBookEntry): Promise<number> {
@@ -250,9 +283,8 @@ export class PersistenceService {
     return (await this.port.getWorkspace(documentId)) ?? null;
   }
 
-  async saveWorkspace(snapshot: WorkspaceSnapshot): Promise<void> {
-    await this.port.putWorkspace(snapshot);
-    await this.port.updateBookMetadata(snapshot.documentId, { lastSavedAt: snapshot.savedAt, lastOpenedAt: new Date().toISOString() });
+  async saveWorkspace(snapshot: WorkspaceSnapshot, expectedVersion: WorkspaceVersion = null): Promise<WorkspaceSnapshot> {
+    return this.port.putWorkspace(snapshot, expectedVersion);
   }
 
   async saveBookAsset(input: {
