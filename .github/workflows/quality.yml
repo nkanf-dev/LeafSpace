@@ -28,7 +28,9 @@ jobs:
       - run: npm run test:ui
   browser-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The single-worker WebKit matrix includes mobile and stability repeats.
+    # Keep every check and per-test deadline while allowing normal runner variance.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

@@ -98,6 +98,15 @@ describe('App document workflows', () => {
     expect(recent).toHaveBeenCalledTimes(1);
   });
 
+  it('restores full header-button contrast immediately when a control becomes enabled', async () => {
+    setupDependencies(); openExistingBook(); render(<App />);
+    for (const name of ['导入书籍', '保存现场']) {
+      const button = await screen.findByRole('button', { name });
+      expect(button).toHaveClass('transition-colors');
+      for (const unsafe of ['transition', 'transition-opacity', 'transition-all']) expect(button).not.toHaveClass(unsafe);
+    }
+  });
+
   it('provides a live autosave getter that blocks an idle registration until import finishes', async () => {
     const { register } = setupDependencies();
     let finish!: () => void;

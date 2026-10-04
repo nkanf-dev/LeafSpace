@@ -26,8 +26,10 @@ function isCurrentWorkspaceSaved(documentId: string | null) {
     && JSON.stringify(snapshot.windows) === JSON.stringify(windows);
 }
 
-const solidButton = 'inline-flex min-h-10 items-center justify-center gap-2 border border-stone-900 bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-50';
-const outlineButton = 'inline-flex min-h-10 items-center justify-center gap-2 border border-[var(--border)] px-3 py-2 text-sm font-medium text-stone-700 transition hover:border-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50';
+// Disabled controls may be muted, but re-enabled text must regain its full
+// contrast immediately instead of fading through a readable-but-low-contrast state.
+const solidButton = 'inline-flex min-h-10 items-center justify-center gap-2 border border-stone-900 bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-50';
+const outlineButton = 'inline-flex min-h-10 items-center justify-center gap-2 border border-[var(--border)] px-3 py-2 text-sm font-medium text-stone-700 transition-colors hover:border-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50';
 
 function App() {
   const book = useBookStore();
