@@ -3,11 +3,14 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { thumbnailService } from '../services/ThumbnailService';
 import type { HeldPage } from '../types/domain';
+import { normalizeHeldPageMetadata, type HeldPageMetadata } from '../utils/heldPageMetadata';
 
 export const MAX_HELD_PAGES = 12;
 
 export interface HeldStoreState {
   notice: string | null;
+  metadataGeneration: number;
+  updatePageMetadata: (id: string, generation: number, changes: HeldPageMetadata) => boolean;
   clearNotice: () => void;
   holdPage: (pageNumber: number) => Promise<void>;
   markHeldPageClosed: (pageNumber: number, windowId: string) => void;
@@ -35,6 +38,20 @@ function sanitizeLinkedWindowIds(linkedWindowIds: string[]): string[] {
 
 export const useHeldStore = create<HeldStoreState>((set) => ({
   ...initialState,
+  metadataGeneration: 0,
+  updatePageMetadata: (id, generation, changes) => {
+    const metadata = normalizeHeldPageMetadata(changes);
+    if (!metadata) return false;
+    let accepted = false;
+    set((state) => {
+      const page = state.pages.find(page => page.id === id);
+      if (generation !== state.metadataGeneration || !page) return state;
+      accepted = true;
+      if (Object.entries(metadata).every(([key, value]) => page[key as keyof HeldPageMetadata] === value)) return state;
+      return { pages: state.pages.map(candidate => candidate.id === id ? { ...candidate, ...metadata } : candidate) };
+    });
+    return accepted;
+  },
   clearNotice: () => set({ notice: null }),
   holdPage: async (pageNumber) => {
     if (pendingHoldPages.has(pageNumber)) {
@@ -132,12 +149,14 @@ export const useHeldStore = create<HeldStoreState>((set) => ({
   },
   reset: () => {
     pendingHoldPages.clear();
-    set(() => ({
+    set((state) => ({
       ...initialState,
+      metadataGeneration: state.metadataGeneration + 1,
     }));
   },
   restorePages: (pages) => {
-    set(() => ({
+    set((state) => ({
+      metadataGeneration: state.metadataGeneration + 1,
       pages: Array.from(new Map(
         pages.map((page) => {
           const linkedWindowIds = sanitizeLinkedWindowIds(page.linkedWindowIds ?? []);

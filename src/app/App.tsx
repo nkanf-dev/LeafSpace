@@ -8,7 +8,7 @@ import { useBookStore } from '../stores/bookStore';
 import { useHeldStore } from '../stores/heldStore';
 import { useWindowStore } from '../stores/windowStore';
 import { useQuickFlipStore } from '../stores/quickFlipStore';
-import { useWorkspaceStore } from '../stores/workspaceStore';
+import { useWorkspaceStore, type WorkspaceConflict } from '../stores/workspaceStore';
 import { useUnsavedExitGuard } from '../hooks/useUnsavedExitGuard';
 import { useWorkspaceAutoSave } from '../hooks/useWorkspaceAutoSave';
 import { PDFPasswordRequiredError } from '../services/PDFService';
@@ -26,6 +26,13 @@ function isCurrentWorkspaceSaved(documentId: string | null) {
     && JSON.stringify(snapshot.windows) === JSON.stringify(windows);
 }
 
+function conflictDescription(conflict: WorkspaceConflict): string {
+  const page = conflict.currentPage === null ? '页码未知' : `第 ${conflict.currentPage} 页`;
+  const saved = conflict.savedAt && Number.isFinite(Date.parse(conflict.savedAt))
+    ? `，保存于 ${new Date(conflict.savedAt).toLocaleString('zh-CN')}` : '';
+  return `检测到的已存现场：${page}${saved}。`;
+}
+
 // Disabled controls may be muted, but re-enabled text must regain its full
 // contrast immediately instead of fading through a readable-but-low-contrast state.
 const solidButton = 'inline-flex min-h-10 items-center justify-center gap-2 border border-stone-900 bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-50';
@@ -34,7 +41,7 @@ const outlineButton = 'inline-flex min-h-10 items-center justify-center gap-2 bo
 function App() {
   const book = useBookStore();
   const { currentPage, totalPages, documentId, documentName, sessionId, scale, status: bookStatus, loadDocument } = book;
-  const { pages: heldPages, holdPage, unholdPage, reset: resetHeldPages } = useHeldStore();
+  const { pages: heldPages, metadataGeneration, updatePageMetadata, holdPage, unholdPage, reset: resetHeldPages } = useHeldStore();
   const { windows, activeWindowId, navigateActive, setLayout, notice: windowNotice, clearNotice: clearWindowNotice, updateWindow, closeWindow, openInNewWindow, setActiveWindow, reset: resetWindows } = useWindowStore();
   const { isOpen: isQuickFlipVisible, close: closeQuickFlip, open: openQuickFlip } = useQuickFlipStore();
   const activePage = windows.find(window => window.id === activeWindowId)?.pageNumber ?? currentPage;
@@ -46,6 +53,8 @@ function App() {
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   const [showHeldPages, setShowHeldPages] = useState(false);
   const [replaceDocumentId, setReplaceDocumentId] = useState<string | null>(null);
+  const [conflictResolution, setConflictResolution] = useState<{ action: 'reload' | 'overwrite'; conflict: WorkspaceConflict } | null>(null);
+  const conflictOpener = useRef<HTMLElement | null>(null);
   const saveButtonRef = useRef<HTMLButtonElement>(null);
   const problemButtonRef = useRef<HTMLButtonElement>(null);
   const problemRef = useRef<HTMLDivElement>(null);
@@ -92,6 +101,8 @@ function App() {
     || (workspaceStatus === 'saving' && workspace.unrestoredDocumentId === documentId);
   const thumbnailActions = useThumbnailActions(`${showHeldPages}:${busy}`);
   const ready = !!documentId && bookStatus === 'ready' && !busy;
+  const conflictNeedsConfirmation = conflictResolution && conflictResolution.conflict.documentId === documentId
+    && conflictResolution.conflict.sessionId === sessionId && workspace.conflict?.version === conflictResolution.conflict.version;
   const replacementNeedsConfirmation = replaceDocumentId === documentId && !!documentId && workspace.unrestoredDocumentId === documentId;
   const flushWorkspace = useCallback(async (id: string) => {
     // A late scroll/render event may settle while the first write is pending.
@@ -117,7 +128,9 @@ function App() {
       const previousBook = useBookStore.getState();
       if (previousBook.documentId && previousBook.status === 'ready') {
         if (!await flushWorkspace(previousBook.documentId)) {
-          setWorkflowError(useWorkspaceStore.getState().unrestoredDocumentId === previousBook.documentId
+          setWorkflowError(useWorkspaceStore.getState().conflict
+            ? useWorkspaceStore.getState().error
+            : useWorkspaceStore.getState().unrestoredDocumentId === previousBook.documentId
             ? '上次阅读现场尚未恢复，已暂停切换书籍。请先重试恢复，或点击「保存现场」确认替换。'
             : '当前阅读现场未能保存，已暂停切换书籍。请重试保存后再导入，避免丢失刚才的更改。');
           return;
@@ -154,17 +167,23 @@ function App() {
       heldPages: useHeldStore.getState().pages, windows: currentWindows.windows,
       activeWindowId: currentWindows.activeWindowId,
       enabled: !importLock.current && currentBook.status === 'ready' && currentWorkspace.status === 'idle'
-        && currentWorkspace.unrestoredDocumentId !== currentBook.documentId,
+        && currentWorkspace.unrestoredDocumentId !== currentBook.documentId && !currentWorkspace.conflict,
     };
   }, []);
   useWorkspaceAutoSave({ documentId, sessionId, currentPage, scale, heldPages, windows, activeWindowId,
-    enabled: ready && workspaceStatus === 'idle' && workspace.unrestoredDocumentId !== documentId,
+    enabled: ready && workspaceStatus === 'idle' && workspace.unrestoredDocumentId !== documentId && !workspace.conflict,
     currentSnapshot: workspace.currentSnapshot, readCurrent: readAutoSaveState, saveWorkspace });
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (thumbnailActions.controller.ownsInput() || busy || event.defaultPrevented || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
       if (event.key === 'Escape' && !isQuickFlipVisible) {
+        if (conflictNeedsConfirmation) {
+          event.preventDefault();
+          setConflictResolution(null);
+          conflictOpener.current?.focus();
+          return;
+        }
         if (replacementNeedsConfirmation) {
           event.preventDefault();
           setReplaceDocumentId(null);
@@ -195,7 +214,7 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [thumbnailActions.controller, ready, busy, isQuickFlipVisible, activePage, showQuickFlip, dismissQuickFlip, showHeldPages, replacementNeedsConfirmation]);
+  }, [thumbnailActions.controller, ready, busy, isQuickFlipVisible, activePage, showQuickFlip, dismissQuickFlip, showHeldPages, replacementNeedsConfirmation, conflictNeedsConfirmation]);
 
   const returnToLibrary = async () => {
     if (!ready || importLock.current) return;
@@ -256,8 +275,18 @@ function App() {
   };
   const requestSave = () => {
     if (!documentId) return;
-    if (workspace.unrestoredDocumentId === documentId) setReplaceDocumentId(documentId);
+    if (workspace.conflict) { setWorkflowError(null); setDismissedError(null); }
+    else if (workspace.unrestoredDocumentId === documentId) setReplaceDocumentId(documentId);
     else void saveWorkspace(documentId);
+  };
+  const requestConflictResolution = (action: 'reload' | 'overwrite', opener: HTMLElement) => {
+    if (!workspace.conflict) return;
+    conflictOpener.current = opener;
+    setConflictResolution({ action, conflict: workspace.conflict });
+  };
+  const closeConflictConfirmation = () => {
+    setConflictResolution(null);
+    conflictOpener.current?.focus();
   };
   const closeReplaceConfirmation = () => {
     setReplaceDocumentId(null);
@@ -297,10 +326,28 @@ function App() {
           <button autoFocus aria-describedby="workspace-replacement-warning" className="min-h-10 px-3 py-2 underline" onClick={closeReplaceConfirmation}>取消覆盖</button>
         </div>}
 
+        {conflictNeedsConfirmation && conflictResolution && documentId && <div role="group" aria-label="确认解决现场冲突" aria-describedby="workspace-conflict-warning" onKeyDown={event => {
+          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeConflictConfirmation(); }
+        }} className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p id="workspace-conflict-warning" className="min-w-0 flex-1">{conflictDescription(conflictResolution.conflict)}{conflictResolution.action === 'reload'
+            ? '载入检测到的已存现场会替换此标签页尚未保存的页码、夹页（含名称和备注）和窗口布局。此页更改将丢失；原 PDF 不受影响。若已存现场再次变化，会保留此页并重新提示。'
+            : '将用此页当前的页码、夹页（含名称和备注）和窗口布局覆盖检测到的已存现场。已存现场将被替换；原 PDF 不受影响。若其他标签页再次保存，仍会暂停并提示。'}</p>
+          <button aria-describedby="workspace-conflict-warning" disabled={busy || workspaceStatus === 'saving'} className="min-h-10 border border-amber-900 px-3 py-2" onClick={() => {
+            const { action, conflict } = conflictResolution;
+            closeConflictConfirmation(); setWorkflowError(null); setDismissedError(null);
+            void workspace.resolveWorkspaceConflict(documentId, action, conflict.version);
+          }}>{conflictResolution.action === 'reload' ? '确认载入' : '确认覆盖'}</button>
+          <button autoFocus aria-describedby="workspace-conflict-warning" className="min-h-10 px-3 py-2 underline" onClick={closeConflictConfirmation}>取消处理</button>
+        </div>}
+
         {problemVisible && <div ref={problemRef} id="workspace-problem-guidance" role="alert" aria-label="问题详情" aria-describedby="workspace-problem-message" tabIndex={-1} className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <span id="workspace-problem-message" className="min-w-0 basis-full sm:flex-1">{workflowError || (workspace.errorOperation === 'register' ? 'PDF 尚未保存到本机，请保留原文件。可以继续阅读，但刷新或关闭页面可能丢失未保存的现场；请先重试保存。' : workspace.error ? `本机存储遇到问题：${workspace.error}` : '文件加载失败，请检查 PDF 后重新导入。')}</span>
-          {workspace.error && workspace.errorOperation !== 'open' && <button className="underline underline-offset-4" onClick={retryStorage} disabled={busy || workspaceStatus === 'saving'}>{workspace.errorOperation === 'restore' ? '重试恢复' : workspace.errorOperation === 'recent' ? '重试读取' : '重试保存'}</button>}
-          <button className="underline underline-offset-4" onClick={() => fileInputRef.current?.click()} disabled={busy}>重新导入</button>
+          {workspace.error && workspace.errorOperation !== 'open' && !workspace.conflict && <button className="underline underline-offset-4" onClick={retryStorage} disabled={busy || workspaceStatus === 'saving'}>{workspace.errorOperation === 'restore' ? '重试恢复' : workspace.errorOperation === 'recent' ? '重试读取' : '重试保存'}</button>}
+          {workspace.conflict && <>
+            <button className="min-h-10 underline underline-offset-4" disabled={busy || workspaceStatus === 'saving'} onClick={event => requestConflictResolution('reload', event.currentTarget)}>载入已存现场</button>
+            <button className="min-h-10 underline underline-offset-4" disabled={busy || workspaceStatus === 'saving'} onClick={event => requestConflictResolution('overwrite', event.currentTarget)}>用此页覆盖</button>
+          </>}
+          {!workspace.conflict && <button className="underline underline-offset-4" onClick={() => fileInputRef.current?.click()} disabled={busy}>重新导入</button>}
           <button aria-label="关闭提示" className="p-2" onClick={dismissProblem}><X size={18} /></button>
         </div>}
 
@@ -360,7 +407,11 @@ function App() {
           </section>
           {documentId && <aside id="held-pages-panel" aria-label="夹页列表" className={`${showHeldPages ? 'absolute inset-0 z-30 flex' : 'hidden'} min-h-0 w-full shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface)] lg:static lg:flex lg:w-[280px]`}>
             <button ref={heldBackRef} className="min-h-11 border-b border-[var(--border)] px-5 text-left text-sm lg:hidden" onClick={closeHeldPanel}>← 返回阅读</button>
-            <HeldPagesPanel pages={heldPages} thumbnailActions={thumbnailActions.controller} actionsSuspended={thumbnailActions.isOpen} fallbackActionFocus={() => heldToggleRef.current} interactionKey={`${documentId}:${activeWindowId}:${showHeldPages}:${busy}:${isQuickFlipVisible}`} onReorder={useHeldStore.getState().reorderHeldPages} onPrepareReadPage={page => {
+            <HeldPagesPanel metadataContextKey={`${documentId}:${sessionId}:${metadataGeneration}:${showHeldPages}:${busy}:${isQuickFlipVisible}`} onUpdateMetadata={(id, changes) => {
+              const current = useBookStore.getState();
+              if (!ready || importLock.current || current.documentId !== documentId || current.sessionId !== sessionId || current.status !== 'ready' || useWorkspaceStore.getState().status === 'restoring') return false;
+              return updatePageMetadata(id, metadataGeneration, changes);
+            }} pages={heldPages} thumbnailActions={thumbnailActions.controller} actionsSuspended={thumbnailActions.isOpen} fallbackActionFocus={() => heldToggleRef.current} interactionKey={`${documentId}:${activeWindowId}:${showHeldPages}:${busy}:${isQuickFlipVisible}`} onReorder={useHeldStore.getState().reorderHeldPages} onPrepareReadPage={page => {
               const transaction = prepareHeldRead(page.pageNumber);
               return { ...transaction, commit: () => {
                 if (!transaction.commit()) return false;

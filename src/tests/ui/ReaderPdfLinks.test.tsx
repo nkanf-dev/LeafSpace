@@ -184,6 +184,21 @@ describe('owner-scoped internal PDF link activation', () => {
       windowStore.getState().updateWindow(id, { viewport: { scale: 2, scrollLeft: 20, scrollTop: 30 } }); });
     await resolve(pending); expect(windowStore.getState().windows.find(window => window.id === id)?.pageNumber).toBe(3);
   });
+  it('accepted same-page scene restoration retires a reference link before it can overwrite the restored scene', async () => {
+    load(); const id = windowStore.getState().openInNewWindow(1); render(<Reference id={id} />);
+    const region = screen.getByRole('region'), pending = await beginNamed(region);
+    act(() => windowStore.getState().restoreWindows(windowStore.getState().windows, id));
+    await resolve(pending); expect(windowStore.getState().windows.find(window => window.id === id)?.pageNumber).toBe(1);
+    await activate(region, [6]); expect(windowStore.getState().windows.find(window => window.id === id)?.pageNumber).toBe(7);
+  });
+  it.each(['pending', 'committed'])('new PDF-link activation retires older %s held-read intent before resolution', async stage => {
+    load(); render(<ReaderViewport isMain windowId="main" />);
+    const old = prepareHeldRead(4); if (stage === 'committed') act(() => { expect(old.commit()).toBe(true); });
+    const pending = await beginNamed(main());
+    expect(stage === 'pending' ? old.commit() : old.rollback()).toBe(false);
+    expect(useBookStore.getState().currentPage).toBe(stage === 'pending' ? 1 : 4);
+    await resolve(pending); expect(useBookStore.getState().currentPage).toBe(3);
+  });
   it('cancels during indirect reference resolution and catches a current reference rejection', async () => {
     load(); render(<ReaderViewport isMain windowId="main" />); const region = main(), pdf = documentState(region).pdf;
     const pending = deferred(); pdf.getPageIndex.mockReturnValueOnce(pending.promise);

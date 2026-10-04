@@ -189,6 +189,7 @@ unholdPage(pageNumber: number): void
 reorderHeldPages(fromIndex: number, toIndex: number): void
 markHeldPageOpen(pageNumber: number, windowId: string): void
 markHeldPageClosed(pageNumber: number, windowId: string): void
+updatePageMetadata(id: string, generation: number, changes: Pick<HeldPage, 'customName' | 'note'>): boolean
 ```
 
 ### 5.4 Window actions
@@ -259,3 +260,19 @@ clearWorkspace(documentId: string): Promise<void>
 - Pinch preview transforms pixels locally; release commits one clamped reader scale with the original paper point anchored to the ending midpoint. It never changes another window or the browser viewport scale. Existing 10–400% stored scale compatibility is retained.
 - Timeline pointer preview is transient and never enters book/window stores or autosave. A normal release commits once to the originating active window. Moving more than56px vertically from the starting track position marks release as cancel; moving back resumes preview. Escape/Space, lost capture, pointercancel, blur, book/window/overlay change cancel. Native range keyboard and independent change input remain available.
 - Chromium CDP native touch input and cross-engine DOM TouchEvent contracts are separate evidence categories. iPhone-sized WebKit emulation is not physical iOS testing.
+
+## Cross-tab workspace persistence
+
+- `WorkspaceSnapshot.revision?: string` is an opaque write identity. Existing v1/v2 snapshots remain readable without migration or PDF conversion. The comparison token includes the complete lightweight record to detect legacy writers, even with identical timestamps or reused/missing revisions.
+- `PersistenceService.saveWorkspace(snapshot, expectedVersion)` returns the committed snapshot. Absence is represented by `null`; it never implies permission to replace an existing record. Read/compare/write and lightweight metadata commit share one IndexedDB readwrite transaction. A sidecar failure rolls back the snapshot too. Failed schema upgrades retain the existing read-only legacy fallback.
+- An owned identical-content save returns the existing snapshot without changing timestamps, revision or metadata. A stale identical-content save still conflicts. PDF payloads are never rewritten by workspace saves.
+- Each opening owns a mutable persistence cursor, separate from request generations and exit baselines. Queued same-opening saves read the cursor at execution and advance it only after transaction success. An earlier conflict halts subsequent queued requests. No BroadcastChannel event is required for correctness.
+- A conflict preserves the stored snapshot and every live page, zoom, held-page and window state. It blocks auto/hidden saves and library/import transitions, survives alert dismissal, and retains the unsaved-exit warning. Ordinary Save only exposes resolution controls.
+- Confirmed reload compares a fresh read to the exact detected version before replacing live state; another committed change refreshes conflict details and requires new confirmation. Read/validation failure preserves the live scene, including rollback after partial legacy-layout application. Confirmed overwrite is bound to the exact detected version; another committed change requires a new explicit decision. Cancellation changes neither scene. A confirmed reload immediately retires older link/held-read navigation while its read is pending; accepted same-page scene replacement also retires reference owners. Failed partial application restores content while metadata generations stay monotonic.
+- A still-unread failed-restore replacement requires a successful comparison read before CAS; it never falls back to blind overwriting. Existing running pre-fix tabs cannot be forced to respect CAS. Modern code detects their subsequent changes; users should close or refresh older-version tabs before parallel reading.
+
+## Held-page metadata editing
+
+- Metadata edits patch only explicitly changed `customName`/`note` fields. Names normalize to one trimmed line (80 Unicode code points); notes retain interior newlines (500 code points). Blank fields clear the override. Invalid edits fail atomically; legacy fields are never truncated during read, cancel, restore, or an unrelated edit.
+- `heldStore.metadataGeneration` is transient and advances only on reset/restore, not thumbnail, ordering, or linked-window changes. Metadata writes require the opening generation plus live held-page ID; App additionally checks the book's document/session and loading/restore ownership. Metadata uses the pre-existing saved fields; metadataGeneration never enters snapshots.
+- The inline editor is a transient draft. Save/cancel are separate from navigation; starting editor pointer input disposes a pending held-read transaction and cancels long-press recognition. Enter/Escape during IME composition stay inside the editor. Escape cancels an ordinary draft before global reference/drawer closing. Document/session/replaced held-list, removed held-page, and temporary surface/layout interruptions retire the draft. Ordinary reader page/active-window changes, consulting another held card, reordering, and window blur preserve it, including a delayed source-owned PDF link resolution. Removing the edited page retires its draft; removing another page does not.

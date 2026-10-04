@@ -284,6 +284,9 @@ export const useWindowStore = create<WindowStoreState>((set, get) => ({
     const ordered = [...normalized.filter(window => window.id === 'main'), ...normalized.filter(window => window.id !== 'main')];
     const nextActiveId = ordered.some((window) => window.id === activeWindowId) ? activeWindowId! : 'main';
     const nextWindows = activate(ordered, nextActiveId);
+    // Restoring a chosen scene replaces reading intent even if a reference keeps
+    // the same ID and page. Retire links/held reads before they can alter it later.
+    for (const id of new Set([...get().windows, ...nextWindows].map(window => window.id))) notifyReaderNavigation(id);
     heldStore.getState().restorePages(heldStore.getState().pages.map((page) => ({
       ...page, linkedWindowIds: nextWindows.filter((window) => window.pageNumber === page.pageNumber).map((window) => window.id),
     })));

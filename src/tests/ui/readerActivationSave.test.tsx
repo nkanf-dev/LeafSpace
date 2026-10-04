@@ -32,7 +32,7 @@ function mouseClick(region: HTMLElement) {
 async function setup(panes = 1, active: 'main' | 'reference' = 'main') {
   const written: WorkspaceSnapshot[] = [];
   const service = new PersistenceService();
-  const save = vi.spyOn(service, 'saveWorkspace').mockImplementation(async snapshot => { written.push(structuredClone(snapshot)); });
+  const save = vi.spyOn(service, 'saveWorkspace').mockImplementation(async snapshot => { written.push(structuredClone(snapshot)); return snapshot; });
   vi.spyOn(service, 'loadWorkspace').mockResolvedValue(null);
   vi.spyOn(service, 'listRecentBooks').mockResolvedValue([]);
   configureWorkspaceStoreDependencies({ persistenceService: service });

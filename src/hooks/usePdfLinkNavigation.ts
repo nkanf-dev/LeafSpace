@@ -3,7 +3,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { bookStore } from '../stores/bookStore';
 import { windowStore } from '../stores/windowStore';
 import { quickFlipStore } from '../stores/quickFlipStore';
-import { subscribeReaderNavigation } from '../services/readerNavigationIntent';
+import { notifyReaderNavigation, subscribeReaderNavigation } from '../services/readerNavigationIntent';
 
 type Owner = { sessionId: number; documentUrl: string | null; windowId: string };
 type PageOwner = { owner: Owner; pageNumber: number; attempt: number };
@@ -150,6 +150,9 @@ export function usePdfLinkNavigation({ sessionId, documentUrl, windowId, pageNum
       || containerRef.current?.closest('[inert]')
       || (quickFlipStore.getState().isOpen && windowStore.getState().activeWindowId === owner.windowId)
       || windowStore.getState().windows.find(window => window.id === owner.windowId)?.pageNumber !== page.pageNumber) return;
+    // Retire older held-read/link intent at activation, before any await. Publish
+    // before making our ticket: its synchronous subscription advances the sequence.
+    notifyReaderNavigation(owner.windowId);
     const ticket = { id: sequence.current, page, pdf: source.pdf };
     pending.current = ticket;
     void follow(ticket, item.destination);

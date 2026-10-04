@@ -190,4 +190,125 @@ describe('held-page read intent', () => {
     await act(async () => vi.advanceTimersByTime(221));
     expect(bookStore.getState().currentPage).toBe(3);
   });
+  it('saves metadata without changing the active reference, reading viewports, or PDF source', async () => {
+    const id = windowStore.getState().openInNewWindow(5);
+    windowStore.getState().updateWindow(id, { viewport: { scale: 1.7, mode: 'grab', scrollLeft: 21, scrollTop: 140 } });
+    const before = { book: bookStore.getState(), windows: windowStore.getState().windows };
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '编辑第 8 页名称和备注' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '名称' }), { target: { value: '图示' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), { target: { value: '对照定义' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(heldStore.getState().pages[0]).toMatchObject({ customName: '图示', note: '对照定义' });
+    expect(screen.getByRole('button', { name: '阅读第 8 页' })).toHaveAccessibleDescription('图示 对照定义');
+    expect(windowStore.getState().windows).toBe(before.windows);
+    expect(windowStore.getState().activeWindowId).toBe(id);
+    expect(bookStore.getState()).toBe(before.book);
+  });
+
+  it.each(['desktop', 'compact'])('gives editor Escape priority over the %s reference/drawer', async layout => {
+    if (layout === 'compact') vi.stubGlobal('innerWidth', 390);
+    const id = windowStore.getState().openInNewWindow(5);
+    render(<App />);
+    if (layout === 'compact') fireEvent.click(screen.getByRole('button', { name: '夹页 1' }));
+    fireEvent.click(screen.getByRole('button', { name: '编辑第 8 页名称和备注' }));
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '名称' }), { key: 'Escape', isComposing: true, keyCode: 229 });
+    expect(screen.getByRole('textbox', { name: '名称' })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '名称' }), { key: 'Escape' });
+    expect(screen.queryByRole('textbox', { name: '名称' })).not.toBeInTheDocument();
+    expect(windowStore.getState().windows.some(window => window.id === id)).toBe(true);
+    if (layout === 'compact') expect(screen.getByRole('button', { name: '夹页 1' })).toHaveAttribute('aria-expanded', 'true');
+    await act(async () => vi.advanceTimersByTime(20));
+    expect(screen.getByRole('button', { name: '编辑第 8 页名称和备注' })).toHaveFocus();
+  });
+
+  it.each(['book', 'same-book-reopen', 'restore', 'remove', 'quick-flip'])('retires editor metadata on %s changes', async change => {
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '编辑第 8 页名称和备注' }));
+    const staleForm = screen.getByRole('form', { name: '编辑第 8 页名称和备注' });
+    fireEvent.change(screen.getByRole('textbox', { name: '名称' }), { target: { value: '旧草稿' } });
+    act(() => {
+      if (change === 'book' || change === 'same-book-reopen') bookStore.getState().setDocumentReady({ documentId: change === 'book' ? 'other' : 'intent', totalPages: 20 });
+      if (change === 'restore') heldStore.getState().restorePages(heldStore.getState().pages);
+      if (change === 'remove') heldStore.getState().unholdPage(8);
+      if (change === 'quick-flip') quickFlipStore.getState().open(3);
+    });
+    expect(screen.queryByRole('textbox', { name: '名称' })).not.toBeInTheDocument();
+    fireEvent.submit(staleForm);
+    expect(heldStore.getState().pages.every(page => !page.customName && !page.note)).toBe(true);
+  });
+
+  it('claims a pending mouse read on editor pointerdown before its delayed click can commit', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '阅读第 8 页' }), { detail: 1 });
+    await act(async () => vi.advanceTimersByTime(210));
+    const edit = screen.getByRole('button', { name: '编辑第 8 页名称和备注' });
+    pointer(edit, 'pointerdown', { pointerType: 'mouse' });
+    await act(async () => vi.advanceTimersByTime(100));
+    fireEvent.click(edit);
+    expect(bookStore.getState().currentPage).toBe(3);
+    expect(windowStore.getState().windows).toHaveLength(1);
+    expect(screen.getByRole('textbox', { name: '名称' })).toHaveFocus();
+  });
+
+  it.each(['compact', 'desktop'])('cancels a draft and recovers visible focus on a move to %s layout', async destination => {
+    vi.stubGlobal('innerWidth', destination === 'compact' ? 1440 : 390);
+    render(<App />);
+    const toggle = screen.getByRole('button', { name: '夹页 1' });
+    if (destination === 'desktop') fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: '编辑第 8 页名称和备注' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '名称' }), { target: { value: '未保存' } });
+    vi.stubGlobal('innerWidth', destination === 'compact' ? 390 : 1440);
+    fireEvent(window, new Event('resize'));
+    await act(async () => vi.advanceTimersByTime(20));
+    expect(screen.queryByRole('textbox', { name: '名称' })).not.toBeInTheDocument();
+    expect(destination === 'compact' ? toggle : screen.getByRole('button', { name: '编辑第 8 页名称和备注' })).toHaveFocus();
+    expect(heldStore.getState().pages[0].customName).toBeUndefined();
+  });
+
+  it('retains a held-page draft while the reader changes pages or focus windows', () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '编辑第 8 页名称和备注' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '名称' }), { target: { value: '正在查阅的证明' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), { target: { value: '切换阅读页后继续补充' } });
+    act(() => bookStore.getState().setCurrentPage(6));
+    expect(screen.getByRole('textbox', { name: '名称' })).toHaveValue('正在查阅的证明');
+    expect(screen.getByRole('textbox', { name: '名称' })).toHaveFocus();
+    act(() => windowStore.getState().openInNewWindow(11));
+    expect(screen.getByRole('textbox', { name: '备注' })).toHaveValue('切换阅读页后继续补充');
+    const windows = windowStore.getState().windows;
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(heldStore.getState().pages[0]).toMatchObject({ customName: '正在查阅的证明', note: '切换阅读页后继续补充' });
+    expect(bookStore.getState().currentPage).toBe(6);
+    expect(windowStore.getState().windows).toBe(windows);
+  });
+
+  it.each(['read', 'reference', 'double-click', 'reorder', 'remove-other'])('retains a live held draft through another card action: %s', async action => {
+    await heldStore.getState().holdPage(12);
+    if (action === 'remove-other') windowStore.getState().openInNewWindow(12);
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '编辑第 8 页名称和备注' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '备注' }), { target: { value: '查阅其他夹页时保留的草稿' } });
+    if (action === 'read') fireEvent.click(screen.getByRole('button', { name: '阅读第 12 页' }), { detail: 0 });
+    if (action === 'reference') fireEvent.click(screen.getByRole('button', { name: '打开第 12 页参考窗口' }));
+    if (action === 'double-click') {
+      const other = screen.getByRole('button', { name: '阅读第 12 页' }); fireEvent.click(other, { detail: 1 });
+      await act(async () => vi.advanceTimersByTime(221)); fireEvent.doubleClick(other, { detail: 2 });
+    }
+    if (action === 'reorder') fireEvent.click(screen.getByRole('button', { name: '上移第 12 页夹页' }));
+    if (action === 'remove-other') {
+      const inertRead = screen.getByRole('button', { name: '阅读第 8 页', hidden: true });
+      const focus = vi.spyOn(inertRead, 'focus');
+      fireEvent.click(screen.getByRole('button', { name: '移除第 12 页夹页' }));
+      fireEvent.click(screen.getByRole('button', { name: '保留窗口' }));
+      await act(async () => vi.advanceTimersByTime(20));
+      expect(screen.getByRole('textbox', { name: '名称' })).toHaveFocus(); expect(focus).not.toHaveBeenCalled();
+    }
+    expect(screen.getByRole('textbox', { name: '备注' })).toHaveValue('查阅其他夹页时保留的草稿');
+    const scene = windowStore.getState().windows;
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(heldStore.getState().pages.find(page => page.pageNumber === 8)?.note).toBe('查阅其他夹页时保留的草稿');
+    expect(windowStore.getState().windows).toBe(scene);
+  });
+
 });

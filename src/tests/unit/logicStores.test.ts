@@ -127,6 +127,8 @@ describe('logic store integration', () => {
       totalPages: 20,
     });
     await heldStore.getState().holdPage(7);
+    const held = heldStore.getState();
+    held.updatePageMetadata(held.pages[0].id, held.metadataGeneration, { customName: '定义与证明', note: '对照第二章\n留待复习' });
     const splitWindowId = windowStore.getState().openInSplit(9);
     const secondWindowId = windowStore.getState().openInNewWindow(7);
     windowStore.getState().setActiveWindow(splitWindowId);
@@ -143,6 +145,7 @@ describe('logic store integration', () => {
     expect(useBookStore.getState().scale).toBe(1.5);
     expect(heldStore.getState().pages.map((page) => page.pageNumber)).toEqual([7]);
     expect(heldStore.getState().pages[0].linkedWindowIds).toContain(secondWindowId);
+    expect(heldStore.getState().pages[0]).toMatchObject({ customName: '定义与证明', note: '对照第二章\n留待复习' });
     expect(windowStore.getState().windows.some((window) => window.id === splitWindowId)).toBe(true);
     expect(workspaceStore.getState().status).toBe('idle');
     expect(workspaceStore.getState().currentSnapshot?.documentId).toBe('doc-save');
@@ -262,7 +265,7 @@ describe('logic store integration', () => {
 
   it('ignores save and restore requests for a different document', async () => {
     const service = new PersistenceService();
-    const save = vi.spyOn(service, 'saveWorkspace').mockResolvedValue(undefined);
+    const save = vi.spyOn(service, 'saveWorkspace').mockImplementation(async snapshot => snapshot);
     const load = vi.spyOn(service, 'loadWorkspace').mockResolvedValue(null);
     configureWorkspaceStoreDependencies({ persistenceService: service });
     useBookStore.getState().setDocumentReady({ documentId: 'current', totalPages: 20 });
@@ -304,8 +307,8 @@ describe('logic store integration', () => {
     const service = new PersistenceService();
     let finishFirst!: () => void;
     const save = vi.spyOn(service, 'saveWorkspace')
-      .mockImplementationOnce(() => new Promise<void>(resolve => { finishFirst = resolve; }))
-      .mockResolvedValueOnce(undefined);
+      .mockImplementationOnce(snapshot => new Promise<void>(resolve => { finishFirst = resolve; }).then(() => snapshot))
+      .mockImplementationOnce(async snapshot => snapshot);
     vi.spyOn(service, 'listRecentBooks').mockResolvedValue([]);
     configureWorkspaceStoreDependencies({ persistenceService: service });
     useBookStore.getState().setDocumentReady({ documentId: 'queued', totalPages: 20, initialPage: 2 });
@@ -326,7 +329,7 @@ describe('logic store integration', () => {
     const service = new PersistenceService();
     let finishAsset!: () => void;
     const register = vi.spyOn(service, 'saveBookAsset').mockImplementation(() => new Promise<void>(resolve => { finishAsset = resolve; }));
-    const save = vi.spyOn(service, 'saveWorkspace').mockResolvedValue(undefined);
+    const save = vi.spyOn(service, 'saveWorkspace').mockImplementation(async snapshot => snapshot);
     vi.spyOn(service, 'listRecentBooks').mockResolvedValue([]);
     configureWorkspaceStoreDependencies({ persistenceService: service });
     useBookStore.getState().setDocumentReady({ documentId: 'pending-asset', totalPages: 20, initialPage: 2 });
@@ -345,9 +348,9 @@ describe('logic store integration', () => {
 
   it('retains the unread-snapshot barrier through registration and distinguishes recovery failures', async () => {
     const service = new PersistenceService();
-    vi.spyOn(service, 'loadWorkspace').mockRejectedValue(new Error('Read failed'));
+    vi.spyOn(service, 'loadWorkspace').mockRejectedValueOnce(new Error('Read failed')).mockResolvedValue(null);
     const register = vi.spyOn(service, 'saveBookAsset').mockRejectedValueOnce(new Error('PDF quota exceeded')).mockResolvedValue(undefined);
-    const save = vi.spyOn(service, 'saveWorkspace').mockRejectedValueOnce(new Error('Snapshot write failed')).mockResolvedValue(undefined);
+    const save = vi.spyOn(service, 'saveWorkspace').mockRejectedValueOnce(new Error('Snapshot write failed')).mockImplementation(async snapshot => snapshot);
     vi.spyOn(service, 'listRecentBooks').mockResolvedValue([]);
     configureWorkspaceStoreDependencies({ persistenceService: service });
     useBookStore.getState().setDocumentReady({ documentId: 'both-failed', totalPages: 20 });
