@@ -20,6 +20,20 @@ function setup(overflow = false, canSwipe = true) {
   return { view, region, paper, onTurn, onZoom, touch, event };
 }
 describe('reader touch transactions', () => {
+  it('native suppression distinguishes pointing clicks from Firefox-style keyboard activation', () => {
+    const { event, touch, paper } = setup();
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000), clicked = vi.fn();
+    paper.addEventListener('click', clicked);
+    try {
+      event('touchstart', [touch(1, 100), touch(2, 200)]); event('touchend', []);
+      const pointer = new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 });
+      Object.defineProperty(pointer, 'pointerId', { value: 7 }); fireEvent(paper, pointer);
+      expect(pointer.defaultPrevented).toBe(true); expect(clicked).not.toHaveBeenCalled();
+      const keyboard = new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 });
+      Object.defineProperty(keyboard, 'pointerId', { value: -1 }); fireEvent(paper, keyboard);
+      expect(keyboard.defaultPrevented).toBe(false); expect(clicked).toHaveBeenCalledOnce();
+    } finally { now.mockRestore(); paper.removeEventListener('click', clicked); }
+  });
   it('turns once for a deliberate horizontal swipe but ignores short or vertical movement', () => {
     const { event, touch, onTurn } = setup();
     event('touchstart', [touch(1, 300)]); event('touchmove', [touch(1, 180)]); event('touchend', [], [touch(1, 180)]);

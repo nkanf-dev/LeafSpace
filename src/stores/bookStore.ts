@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { pdfService } from '../services/PDFService';
 import { thumbnailService } from '../services/ThumbnailService';
+import { notifyReaderNavigation } from '../services/readerNavigationIntent';
 import type { TOCItem } from '../types/domain';
 
 type DocumentSource = File | string;
@@ -131,7 +132,10 @@ export const useBookStore = create<BookStoreState>((set, get) => ({
   },
 
   restoreDocument: (payload) => get().setDocumentReady(payload),
-  setCurrentPage: (page) => set({ currentPage: clampPage(page, get().totalPages) }),
+  setCurrentPage: (page) => {
+    notifyReaderNavigation('main');
+    set({ currentPage: clampPage(page, get().totalPages) });
+  },
   setScale: (scale) => set({ scale: clampScale(scale) }),
   setTotalPages: (value) => {
     const totalPages = normalizeTotalPages(value);

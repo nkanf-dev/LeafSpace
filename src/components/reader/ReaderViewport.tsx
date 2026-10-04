@@ -8,6 +8,7 @@ import { useWindowStore } from '../../stores/windowStore';
 import { useQuickFlipStore } from '../../stores/quickFlipStore';
 import { pdfCMapAssetsUrl, pdfDecoderAssetsUrl, pdfStandardFontAssetsUrl } from '../../services/pdfDecoderAssets';
 import { useReaderGestures } from '../../hooks/useReaderGestures';
+import { usePdfLinkNavigation } from '../../hooks/usePdfLinkNavigation';
 import { MousePointer2, Hand, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -71,6 +72,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   
   const containerRef = useRef<HTMLDivElement>(null);
   const contentFrameRef = useRef<HTMLDivElement>(null);
+  const pageElementRef = useRef<HTMLDivElement>(null);
   const [isPanning, setIsPanning] = useState(false);
   const panGestureActive = useRef(false);
   const [shouldCenterHorizontally, setShouldCenterHorizontally] = useState(true);
@@ -93,6 +95,9 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
       renderGeneration.current += 1;
     };
   }, []);
+  const pdfLinks = usePdfLinkNavigation({ sessionId, documentUrl, windowId: windowId ?? 'main',
+    pageNumber: activePage, attempt: retryAttempt, containerRef, pageRef: pageElementRef });
+  const cancelPdfLinks = pdfLinks.cancel;
   const [renderFeedback, setRenderFeedback] = useState<RenderFeedback>(null);
   const showRenderFailure = renderFeedback?.kind === 'failed' && renderFeedback.token === renderToken;
   const showRenderRetry = renderFeedback?.kind === 'retrying' && renderFeedback.context === renderContext && renderFeedback.attempt === retryAttempt;
@@ -381,13 +386,14 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     if (zoomCorrectionFrame.current !== null) window.cancelAnimationFrame(zoomCorrectionFrame.current);
     zoomCorrectionFrame.current = null;
     renderReady.current = false;
+    cancelPdfLinks();
     const attempt = ++requestedAttempt.current;
     // Supersede old callbacks now, not only after React commits the new Page.
     currentRenderToken.current = null;
     containerRef.current?.focus({ preventScroll: true });
     setRenderFeedback({ kind: 'retrying', context: renderContext, attempt });
     setRetryAttempt(attempt);
-  }, [cancelPanning, cancelZoom, captureScrollIntent, renderContext, renderFeedback]);
+  }, [cancelPanning, cancelPdfLinks, cancelZoom, captureScrollIntent, renderContext, renderFeedback]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -618,7 +624,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
     if (quickFlipVisible || activeWindowId !== (windowId ?? 'main')) cancelZoom();
   }, [activeWindowId, cancelZoom, quickFlipVisible, windowId]);
 
-  useReaderGestures({
+  const readerGestures = useReaderGestures({
     containerRef, frameRef: contentFrameRef, scale, canSwipe: mode === 'grab', isActive: activeWindowId === (windowId ?? 'main'),
     contextKey: `${sessionId}:${windowId}:${documentUrl}:${activePage}:${retryAttempt}:${quickFlipVisible}:${scale}:${mode}`,
     onActivate: () => { cancelZoom(); handleViewportFocus(); },
@@ -672,7 +678,12 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   }, [activePage, holdPage, totalPages, updateActivePage]);
 
   return (
-    <div data-reader-shell className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--surface)]" onFocusCapture={handleViewportFocus} onPointerDownCapture={handleViewportFocus}>
+    <div data-reader-shell className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--surface)]" onFocusCapture={handleViewportFocus} onPointerDownCapture={handleViewportFocus}
+      onKeyDown={event => {
+        if (event.key !== 'Escape' || event.defaultPrevented || !pdfLinks.notice || showRenderFailure || showRenderRetry) return;
+        event.preventDefault(); event.stopPropagation();
+        pdfLinks.cancel(); containerRef.current?.focus({ preventScroll: true });
+      }}>
       <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2 py-1 sm:px-4">
         <div className="flex items-center gap-3">
           <div className="flex bg-[#f0ede9] p-[2px]">
@@ -706,6 +717,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
           role="region"
           aria-label={isMain ? '主阅读区' : `参考阅读区，第 ${activePage} 页`}
           className={`flex min-h-0 min-w-0 flex-1 overflow-auto bg-[#edece9] ${mode === 'grab' ? 'select-none' : 'select-text'}`}
+          onClickCapture={event => { if (!readerGestures.suppressClick(event)) pdfLinks.onClickCapture(event); }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={stopPanning}
@@ -723,13 +735,16 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
               style={paperRatio ? { width: Math.floor(pageWidth * scale) + 2, height: Math.floor(pageWidth * scale * paperRatio) + 2 } : undefined}>
               {file ? (
                 <Document
+                  key={pdfLinks.documentKey}
                   file={file}
                   options={options}
+                  onLoadSuccess={pdfLinks.onDocumentLoad}
                   error={<div role="alert" className="max-w-xs p-6 text-sm text-red-800">页面暂时无法显示，请重新导入这本 PDF。</div>}
                   loading={<div role="status" className="mt-24 text-sm italic text-stone-500" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>正在渲染...</div>}
                 >
                   <Page
                     key={`${sessionId}:${windowId ?? 'main'}:${retryAttempt}`}
+                    inputRef={pageElementRef}
                     canvasRef={initializeCanvas}
                     pageNumber={activePage}
                     width={pageWidth}
@@ -737,6 +752,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
                     className="border border-[#e0ddd5] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.05),0_30px_100px_rgba(0,0,0,0.1)]"
                     renderTextLayer={true}
                     onLoadSuccess={handlePageLoad}
+                    onGetAnnotationsSuccess={pdfLinks.onAnnotations}
                     onRenderSuccess={handleRenderSuccess}
                     onRenderError={handleRenderError}
                     loading={<div role="status" className="p-6 text-sm text-stone-500">正在渲染页面…</div>}
@@ -749,6 +765,16 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
             </div>
           </div>
         </div>
+        {pdfLinks.notice && !showRenderFailure && !showRenderRetry && (
+          <div className="pointer-events-none absolute inset-x-3 bottom-3 z-10 flex justify-center">
+            <div role="alert" className="pointer-events-auto flex max-w-md items-center gap-3 border border-[var(--border)] bg-[var(--surface)] p-3 text-sm text-stone-800 shadow-sm">
+              <p>无法打开此链接。可尝试目录或页码导航。</p>
+              <button type="button" aria-label="关闭链接提示" className="min-h-10 shrink-0 px-2 text-stone-700 hover:bg-stone-100" onClick={() => {
+                containerRef.current?.focus({ preventScroll: true }); pdfLinks.cancel();
+              }}>关闭</button>
+            </div>
+          </div>
+        )}
         {(showRenderFailure || showRenderRetry) && (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-3">
             <div role={showRenderFailure ? 'alert' : 'status'} className="pointer-events-auto max-h-full min-h-0 w-full max-w-sm overflow-auto border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-stone-800 shadow-sm">

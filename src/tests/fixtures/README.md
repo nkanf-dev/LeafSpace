@@ -2,6 +2,8 @@
 
 These PDFs are generated in this repository and contain no personal or user-supplied document content. They have real page trees, content streams, xref tables, and numbered or raster-image pages so Playwright exercises PDF.js parsing and rendering rather than mocked canvases.
 
+`leafspace-links.pdf` has three labeled pages with distinct colored bars, valid numeric/named/indirect-reference destinations, same-page/back links and one `https://example.com/paper` URI inspected only as an attribute. It also includes one deliberate missing named destination to test local feedback. It contains no JavaScript, form or password. Regenerate with `node src/tests/fixtures/generate-linked-pages.mjs` using only Node built-ins. Standard Courier keeps fixture label metrics reproducible. SHA-256: `925e130ce20fbd917d8e4712447f73061f00808acba3ba9df91ea1d79bca3eb5`.
+
 `leafspace-render-recovery.pdf` is a two-page 256×256 RGB raster control with red, green and white regions, small page labels and same-page internal link annotations. The full-page link exercises real PDF layer stacking above a rejected canvas. It contains no external URI, JavaScript, form or password. Regenerate with `node src/tests/fixtures/generate-render-recovery.mjs`; only Node built-ins are required. SHA-256: `be360fdfe93a8fea06be086c10f600ec30439905d4f58ef054151d051f780eda`.
 
 - `leafspace-12-pages.pdf`: 12 portrait pages, distinctive page numbers and green bars

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 
 type Point = { x: number; y: number };
 type Gesture =
@@ -29,6 +29,19 @@ export function useReaderGestures(options: Options) {
   const latest = useRef(options);
   useLayoutEffect(() => { latest.current = options; });
   const cancelRef = useRef<() => void>(() => {});
+  const suppressClickUntil = useRef(0);
+  // React root capture runs before the reader's native capture listener.
+  // Share this guard with PDF link capture so a post-gesture ghost click
+  // cannot navigate first. Firefox can report detail=1 for keyboard clicks;
+  // Pointer Events reserves pointerId=-1 for non-pointing activation. React's
+  // MouseEvent wrapper omits pointerId, so consult the native event as well.
+  const suppressClick = useCallback((event: Pick<MouseEvent, 'detail' | 'preventDefault' | 'stopPropagation'> & { nativeEvent?: MouseEvent }) => {
+    const source = event.nativeEvent ?? event;
+    if (event.detail === 0 || ('pointerId' in source && source.pointerId === -1)
+      || performance.now() >= suppressClickUntil.current) return false;
+    event.preventDefault(); event.stopPropagation();
+    return true;
+  }, []);
   useEffect(() => { cancelRef.current(); }, [options.contextKey]);
   useEffect(() => { if (!options.isActive) cancelRef.current(); }, [options.isActive]);
 
@@ -37,7 +50,6 @@ export function useReaderGestures(options: Options) {
     const frame = options.frameRef.current;
     if (!container || !frame) return;
     let gesture: Gesture | null = null;
-    let suppressClickUntil = 0;
     const clearPreview = () => { frame.style.transform = ''; frame.style.transformOrigin = ''; frame.style.willChange = ''; };
     const cancel = () => { clearPreview(); gesture = null; };
     const interrupt = () => {
@@ -97,7 +109,7 @@ export function useReaderGestures(options: Options) {
         frame.style.transformOrigin = '0 0';
         frame.style.willChange = 'transform';
         frame.style.transform = `translate(${gesture.midpoint.x - gesture.frame.x - gesture.anchor.x * ratio}px, ${gesture.midpoint.y - gesture.frame.y - gesture.anchor.y * ratio}px) scale(${ratio})`;
-        suppressClickUntil = performance.now() + 600;
+        suppressClickUntil.current = performance.now() + 600;
       } else {
         const touch = Array.from(event.touches).find(touch => touch.identifier === (gesture?.kind === 'swipe' ? gesture.id : -1));
         if (!touch || event.touches.length !== 1) { cancel(); return; }
@@ -120,7 +132,7 @@ export function useReaderGestures(options: Options) {
         gesture = event.touches.length ? { kind: 'blocked' } : null;
         if (Math.abs(completed.nextScale - completed.scale) > 0.0001) latest.current.onZoom(completed.nextScale,
           completed.paperPoint, completed.midpoint);
-        suppressClickUntil = performance.now() + 600;
+        suppressClickUntil.current = performance.now() + 600;
       } else if (!event.touches.length) {
         gesture = null;
         if (completed?.kind !== 'swipe') return;
@@ -130,13 +142,13 @@ export function useReaderGestures(options: Options) {
         const dy = last.y - completed.start.y;
         if (Math.abs(dx) >= 56 && Math.abs(dx) > Math.abs(dy) * 1.5 && performance.now() - completed.time <= 700) {
           if (event.cancelable) event.preventDefault();
-          suppressClickUntil = performance.now() + 600;
+          suppressClickUntil.current = performance.now() + 600;
           latest.current.onTurn(dx < 0 ? 1 : -1);
         }
       }
     };
     const cancelTouch = (event: TouchEvent) => { cancel(); if (event.touches.length) gesture = { kind: 'blocked' }; };
-    const click = (event: MouseEvent) => { if (performance.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); } };
+    const click = (event: MouseEvent) => { suppressClick(event); };
     const visibility = () => { if (document.hidden) interrupt(); };
     const key = (event: KeyboardEvent) => {
       if ((gesture?.kind === 'pinch' || gesture?.kind === 'swipe') && (event.key === 'Escape' || event.key === ' ')) {
@@ -167,5 +179,6 @@ export function useReaderGestures(options: Options) {
       window.removeEventListener('resize', interrupt);
       document.removeEventListener('visibilitychange', visibility);
     };
-  }, [options.containerRef, options.frameRef]);
+  }, [options.containerRef, options.frameRef, suppressClick]);
+  return { suppressClick };
 }

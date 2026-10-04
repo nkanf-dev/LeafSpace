@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { bookStore } from './bookStore';
 import { heldStore } from './heldStore';
+import { notifyReaderNavigation } from '../services/readerNavigationIntent';
 import type { ReaderWindow } from '../types/domain';
 
 export const MAX_READER_WINDOWS = 5;
@@ -212,6 +213,7 @@ export const useWindowStore = create<WindowStoreState>((set, get) => ({
     const mainWindow = windows.find(w => w.id === 'main');
     const targetWindow = windows.find(w => w.id === windowId);
     if (!mainWindow || !targetWindow || windowId === 'main') return;
+    notifyReaderNavigation(windowId);
 
     const nextWindows = windows.map(w => {
       if (w.id === 'main') return { ...w, pageNumber: targetWindow.pageNumber, title: targetWindow.title, viewport: targetWindow.viewport };
@@ -229,6 +231,7 @@ export const useWindowStore = create<WindowStoreState>((set, get) => ({
     const { windows } = get();
     if (!windows.some((window) => window.id === windowId)) return;
     if (partial.pageNumber !== undefined) {
+      if (windowId !== 'main') notifyReaderNavigation(windowId);
       const pageNumber = normalizePage(partial.pageNumber);
       partial = { ...partial, pageNumber, title: partial.title ?? createWindowTitle(pageNumber) };
       if (windowId === 'main') bookStore.getState().setCurrentPage(pageNumber);

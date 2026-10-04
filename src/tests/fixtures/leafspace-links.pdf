@@ -1,0 +1,100 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /Names << /Dests << /Names [(chapter) [7 0 R /Fit]] >> >> >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 3 /Kids [3 0 R 5 0 R 7 0 R] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 420 594] /Resources << /Font << /F1 9 0 R >> >> /Contents 4 0 R /Annots [10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 17 0 R] >>
+endobj
+4 0 obj
+<< /Length 432 >>
+stream
+0.2 0.5 0.3 rg 20 560 380 14 re f
+0 0 0 rg
+BT /F1 18 Tf 30 537 Td (LeafSpace links - Page 1) Tj ET
+BT /F1 12 Tf 35 510 Td (Numeric link to page 2) Tj ET
+BT /F1 12 Tf 35 465 Td (Named link to page 3) Tj ET
+BT /F1 12 Tf 35 420 Td (Indirect link to page 3) Tj ET
+BT /F1 12 Tf 35 375 Td (Same page link) Tj ET
+BT /F1 12 Tf 35 330 Td (External URL \(attribute check only\)) Tj ET
+BT /F1 12 Tf 35 285 Td (Missing named destination) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 420 594] /Resources << /Font << /F1 9 0 R >> >> /Contents 6 0 R /Annots [15 0 R] >>
+endobj
+6 0 obj
+<< /Length 146 >>
+stream
+0.1 0.35 0.7 rg 20 560 380 14 re f
+0 0 0 rg
+BT /F1 18 Tf 30 537 Td (LeafSpace links - Page 2) Tj ET
+BT /F1 12 Tf 35 510 Td (Back to page 1) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 420 594] /Resources << /Font << /F1 9 0 R >> >> /Contents 8 0 R /Annots [16 0 R] >>
+endobj
+8 0 obj
+<< /Length 146 >>
+stream
+0.7 0.25 0.1 rg 20 560 380 14 re f
+0 0 0 rg
+BT /F1 18 Tf 30 537 Td (LeafSpace links - Page 3) Tj ET
+BT /F1 12 Tf 35 510 Td (Back to page 1) Tj ET
+endstream
+endobj
+9 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>
+endobj
+10 0 obj
+<< /Type /Annot /Subtype /Link /Rect [30 505 370 526] /Border [0 0 1] /Dest [1 /Fit] >>
+endobj
+11 0 obj
+<< /Type /Annot /Subtype /Link /Rect [30 460 370 481] /Border [0 0 1] /Dest (chapter) >>
+endobj
+12 0 obj
+<< /Type /Annot /Subtype /Link /Rect [30 415 370 436] /Border [0 0 1] /Dest [7 0 R /Fit] >>
+endobj
+13 0 obj
+<< /Type /Annot /Subtype /Link /Rect [30 370 370 391] /Border [0 0 1] /Dest [0 /Fit] >>
+endobj
+14 0 obj
+<< /Type /Annot /Subtype /Link /Rect [30 325 370 346] /Border [0 0 1] /A << /S /URI /URI (https://example.com/paper) >> >>
+endobj
+15 0 obj
+<< /Type /Annot /Subtype /Link /Rect [30 505 370 526] /Border [0 0 1] /Dest [0 /Fit] >>
+endobj
+16 0 obj
+<< /Type /Annot /Subtype /Link /Rect [30 505 370 526] /Border [0 0 1] /Dest [0 /Fit] >>
+endobj
+17 0 obj
+<< /Type /Annot /Subtype /Link /Rect [30 280 370 301] /Border [0 0 1] /Dest (missing) >>
+endobj
+xref
+0 18
+0000000000 65535 f 
+0000000009 00000 n 
+0000000116 00000 n 
+0000000185 00000 n 
+0000000363 00000 n 
+0000000845 00000 n 
+0000000988 00000 n 
+0000001184 00000 n 
+0000001327 00000 n 
+0000001523 00000 n 
+0000001591 00000 n 
+0000001695 00000 n 
+0000001800 00000 n 
+0000001908 00000 n 
+0000002012 00000 n 
+0000002151 00000 n 
+0000002255 00000 n 
+0000002359 00000 n 
+trailer
+<< /Size 18 /Root 1 0 R >>
+startxref
+2464
+%%EOF

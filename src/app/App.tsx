@@ -13,6 +13,7 @@ import { useUnsavedExitGuard } from '../hooks/useUnsavedExitGuard';
 import { useWorkspaceAutoSave } from '../hooks/useWorkspaceAutoSave';
 import { PDFPasswordRequiredError } from '../services/PDFService';
 import { prepareHeldRead } from '../services/HeldReadTransaction';
+import { notifyReaderNavigation } from '../services/readerNavigationIntent';
 import { useThumbnailActions } from '../hooks/useThumbnailActions';
 import { ThumbnailActionDialog } from '../components/thumbnails/ThumbnailActionDialog';
 
@@ -25,8 +26,10 @@ function isCurrentWorkspaceSaved(documentId: string | null) {
     && JSON.stringify(snapshot.windows) === JSON.stringify(windows);
 }
 
-const solidButton = 'inline-flex min-h-10 items-center justify-center gap-2 border border-stone-900 bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-50';
-const outlineButton = 'inline-flex min-h-10 items-center justify-center gap-2 border border-[var(--border)] px-3 py-2 text-sm font-medium text-stone-700 transition hover:border-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50';
+// Disabled controls may be muted, but re-enabled text must regain its full
+// contrast immediately instead of fading through a readable-but-low-contrast state.
+const solidButton = 'inline-flex min-h-10 items-center justify-center gap-2 border border-stone-900 bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-50';
+const outlineButton = 'inline-flex min-h-10 items-center justify-center gap-2 border border-[var(--border)] px-3 py-2 text-sm font-medium text-stone-700 transition-colors hover:border-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50';
 
 function App() {
   const book = useBookStore();
@@ -318,7 +321,15 @@ function App() {
         {(windowNotice || heldNotice) && <div role="status" className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-950"><span>{windowNotice || heldNotice}</span><button aria-label="关闭操作提示" className="p-2" onClick={() => { clearWindowNotice(); useHeldStore.getState().clearNotice(); }}><X size={16} /></button></div>}
         <main inert={busy} className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <section inert={showHeldPages} className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#edece9]">
-            {documentId ? <WorkspaceCanvas subscribeInterruption={thumbnailActions.controller.onInterrupt} windows={windows} onWindowUpdate={(win) => { updateWindow(win.id, win); if (win.isActive) setActiveWindow(win.id); }} onWindowClose={closeReferenceWindow} /> : (
+            {documentId ? <WorkspaceCanvas subscribeInterruption={thumbnailActions.controller.onInterrupt} windows={windows} onWindowUpdate={(win) => {
+              // Canvas callbacks carry the full window for layout operations.
+              // Do not turn a raise/drag/resize into a new page choice or replay
+              // a stale paper viewport while applying that geometry.
+              updateWindow(win.id, { x: win.x, y: win.y, width: win.width, height: win.height,
+                type: win.type, dockMode: win.dockMode, splitRatio: win.splitRatio,
+                zIndex: win.zIndex, isActive: win.isActive });
+              if (win.isActive) setActiveWindow(win.id);
+            }} onWindowClose={closeReferenceWindow} /> : (
               <div className="flex min-h-0 flex-1 overflow-y-auto bg-[var(--surface)] p-4 sm:p-8 lg:items-center lg:justify-center">
                 <div className="m-auto grid w-full max-w-[1080px] grid-cols-1 border border-[var(--border)] bg-[var(--surface)] shadow-[0_24px_70px_rgba(28,25,23,0.05)] md:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
                   <div className="px-6 py-9 sm:px-10 sm:py-12 md:border-r md:border-[var(--border)]">
@@ -363,7 +374,7 @@ function App() {
             }} onPageClick={(page) => { openInNewWindow(page.pageNumber); closeHeldPanel(); }} onRemovePage={(id, closeReferences) => { const page = heldPages.find((candidate) => candidate.id === id); if (page) { if (closeReferences) useWindowStore.getState().closeWindowsForPage(page.pageNumber); unholdPage(page.pageNumber); } }} />
           </aside>}
         </main>
-        {documentId && <footer inert={busy} className="h-16 shrink-0 border-t border-[var(--border)]"><TimelineBar key={`${documentId}:${activeWindowId}:${isQuickFlipVisible}:${showHeldPages}:${busy}:${thumbnailActions.isOpen}`} currentPage={activePage} chapters={book.toc} totalPages={totalPages} onPageClick={jumpToPage} markers={heldPages.map((page) => page.pageNumber)} /></footer>}
+        {documentId && <footer inert={busy} className="h-16 shrink-0 border-t border-[var(--border)]"><TimelineBar key={`${documentId}:${activeWindowId}:${isQuickFlipVisible}:${showHeldPages}:${busy}:${thumbnailActions.isOpen}`} currentPage={activePage} chapters={book.toc} totalPages={totalPages} onPageClick={jumpToPage} onPreviewStart={() => notifyReaderNavigation(useWindowStore.getState().activeWindowId ?? 'main')} markers={heldPages.map((page) => page.pageNumber)} /></footer>}
       </div>
       {isQuickFlipVisible && ready && <QuickFlipOverlay thumbnailActions={thumbnailActions.controller} interactionSuspended={thumbnailActions.isOpen} isVisible restoreFocusOnClose={false} onClose={dismissQuickFlip} currentPage={quickFlipOrigin.current.page} totalPages={totalPages} onPageChange={page => { updateWindow(quickFlipOrigin.current.windowId, { pageNumber: page }); setActiveWindow(quickFlipOrigin.current.windowId); }} />}
       {thumbnailActions.request && <ThumbnailActionDialog controller={thumbnailActions.controller} request={thumbnailActions.request} awaitingRelease={thumbnailActions.awaitingRelease} />}

@@ -85,6 +85,12 @@ test('five-page grid keeps every pane visible after repeated docking, floating a
   await reopenRecent(page, 'leafspace-120-pages.pdf');
   await expect(page.locator('[data-reader-pane]')).toHaveCount(5);
   for (const number of [2, 4, 6, 8]) await expect(page.getByRole('region', { name: `参考阅读区，第 ${number} 页`, exact: true }).locator('canvas')).toBeVisible();
+  // Re-enabling a save after hydration must not animate through disabled opacity.
+  // Keep the full axe assertion below; this checks the styling cause directly.
+  for (const name of ['导入书籍', '保存现场']) {
+    const transition = await page.getByRole('button', { name, exact: true }).evaluate(element => getComputedStyle(element).transitionProperty.split(',').map(value => value.trim()));
+    expect(transition).not.toContain('opacity'); expect(transition).not.toContain('all');
+  }
   const violations = (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()).violations;
   expect(violations).toEqual([]);
 });

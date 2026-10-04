@@ -6,11 +6,12 @@ interface Props {
   currentPage: number;
   totalPages: number;
   onPageClick: (page: number) => void;
+  onPreviewStart?: () => void;
   markers?: number[];
   chapters?: TOCItem[];
 }
 
-export const TimelineBar: React.FC<Props> = ({ currentPage, totalPages, onPageClick, markers = [], chapters = [] }) => {
+export const TimelineBar: React.FC<Props> = ({ currentPage, totalPages, onPageClick, onPreviewStart, markers = [], chapters = [] }) => {
   const [pageInput, setPageInput] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ page: number; origin: number; total: number; outside?: boolean } | null>(null);
   const previewPage = preview?.origin === currentPage && preview.total === totalPages ? preview.page : null;
@@ -88,6 +89,7 @@ export const TimelineBar: React.FC<Props> = ({ currentPage, totalPages, onPageCl
             // semantics. WebKit's internal thumb capture conflicts with explicit
             // input capture; native change timing also differs across engines.
             event.preventDefault();
+            onPreviewStart?.();
             const page = pointerPage(event);
             drag.current = { pointerId: event.pointerId, page, canceled: false, startY: event.clientY, outside: false };
             setPreview({ page, origin: currentPage, total: totalPages });

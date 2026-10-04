@@ -14,6 +14,15 @@ function setup() {
 }
 
 describe('timeline preview', () => {
+  it('announces only accepted preview starts before changing or saving a page', () => {
+    const navigate = vi.fn(), start = vi.fn();
+    render(<TimelineBar currentPage={1} totalPages={3} onPageClick={navigate} onPreviewStart={start} />);
+    const slider = screen.getByRole('slider'); slider.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(slider, { pointerId: 1, button: 2 }); expect(start).not.toHaveBeenCalled();
+    fireEvent.pointerDown(slider, { pointerId: 1, button: 0 }); expect(start).toHaveBeenCalledOnce();
+    fireEvent.pointerDown(slider, { pointerId: 2, button: 0 }); expect(start).toHaveBeenCalledOnce();
+    expect(navigate).not.toHaveBeenCalled();
+  });
   it('previews without navigation, commits once on release, and keeps keyboard changes immediate', () => {
     const { start, move, end, navigate, slider } = setup();
     start(); move();
