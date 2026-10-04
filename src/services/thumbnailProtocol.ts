@@ -3,6 +3,8 @@ export interface ThumbnailLoadDocumentRequest {
   documentId: string;
   source: ArrayBuffer;
   wasmUrl: string;
+  cMapUrl: string;
+  standardFontDataUrl: string;
 }
 
 export interface ThumbnailRenderRequest {

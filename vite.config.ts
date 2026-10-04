@@ -21,6 +21,14 @@ const decoderDirectory = join(generatedPdfjs, pdfjsVersion, 'wasm')
 mkdirSync(decoderDirectory, { recursive: true })
 cpSync(join(pdfjsDirectory, 'wasm'), decoderDirectory, { recursive: true })
 cpSync(join(pdfjsDirectory, 'LICENSE'), join(decoderDirectory, 'LICENSE_PDFJS'))
+for (const directory of ['cmaps', 'standard_fonts']) {
+  const destination = join(generatedPdfjs, pdfjsVersion, directory)
+  mkdirSync(destination, { recursive: true })
+  cpSync(join(pdfjsDirectory, directory), destination, { recursive: true })
+}
+for (const required of ['cmaps/Adobe-GB1-UCS2.bcmap', 'cmaps/UniGB-UTF16-H.bcmap', 'standard_fonts/FoxitSerif.pfb', 'standard_fonts/LiberationSans-Regular.ttf', 'standard_fonts/LICENSE_FOXIT', 'standard_fonts/LICENSE_LIBERATION']) {
+  readFileSync(join(generatedPdfjs, pdfjsVersion, required))
+}
 
 const buildCommit = (() => {
   try { return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() }

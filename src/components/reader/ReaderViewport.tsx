@@ -6,7 +6,7 @@ import { useBookStore } from '../../stores/bookStore';
 import { useHeldStore } from '../../stores/heldStore';
 import { useWindowStore } from '../../stores/windowStore';
 import { useQuickFlipStore } from '../../stores/quickFlipStore';
-import { pdfDecoderAssetsUrl } from '../../services/pdfDecoderAssets';
+import { pdfCMapAssetsUrl, pdfDecoderAssetsUrl, pdfStandardFontAssetsUrl } from '../../services/pdfDecoderAssets';
 import { useReaderGestures } from '../../hooks/useReaderGestures';
 import { MousePointer2, Hand, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
@@ -588,9 +588,10 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
 
   const file = useMemo(() => documentUrl ?? null, [documentUrl]);
   const options = useMemo(() => ({
-    cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
+    cMapUrl: pdfCMapAssetsUrl(pdfjs.version),
     cMapPacked: true,
     wasmUrl: pdfDecoderAssetsUrl(pdfjs.version),
+    standardFontDataUrl: pdfStandardFontAssetsUrl(pdfjs.version),
   }), []);
 
   const modeButtonClasses = (active: boolean) =>
