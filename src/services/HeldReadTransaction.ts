@@ -1,5 +1,6 @@
 import { bookStore } from '../stores/bookStore';
 import { windowStore } from '../stores/windowStore';
+import { notifyReaderNavigation } from './readerNavigationIntent';
 
 export interface PreparedHeldRead {
   commit(): boolean;
@@ -15,6 +16,9 @@ export function prepareHeldRead(pageNumber: number): PreparedHeldRead {
   if (!origin || !book.documentId || book.status !== 'ready') {
     return { commit: () => false, rollback: () => false, dispose: () => undefined };
   }
+  // The click expresses intent now, before the double-click grace period.
+  // An older deferred PDF link must not invalidate this newer prepared read.
+  notifyReaderNavigation(windowId);
   const position = { pageNumber: origin.pageNumber, title: origin.title,
     viewport: { ...origin.viewport, scale: windowId === 'main' ? book.scale : origin.viewport?.scale ?? 1 } };
   const signature = (): readonly unknown[] => {

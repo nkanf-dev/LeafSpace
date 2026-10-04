@@ -2,7 +2,9 @@ import * as pdfjsLib from 'pdfjs-dist';
 import 'pdfjs-dist/build/pdf.worker.mjs';
 import { WorkerCanvasFactory } from './WorkerCanvasFactory';
 import { WorkerWasmFactory } from './WorkerWasmFactory';
-import type { ThumbnailRenderRequest, ThumbnailWorkerRequest, ThumbnailWorkerResponse } from '../services/thumbnailProtocol';
+import { WorkerCMapReaderFactory, WorkerStandardFontDataFactory } from './WorkerFontResources';
+import { assertPdfFontSupport } from '../services/pdfFontSupport';
+import type { ThumbnailLoadDocumentRequest, ThumbnailRenderRequest, ThumbnailWorkerRequest, ThumbnailWorkerResponse } from '../services/thumbnailProtocol';
 
 // 在 Worker 内部，我们直接从核心库加载，不再设置 GlobalWorkerOptions.workerSrc
 // 并且通过 side-effect import 将 WorkerMessageHandler 挂到 globalThis.pdfjsWorker，
@@ -31,7 +33,7 @@ async function disposeCurrentDocument() {
   currentDocumentId = null;
 }
 
-async function ensureDocumentLoaded(documentId: string, source: ArrayBuffer, wasmUrl: string) {
+async function ensureDocumentLoaded({ documentId, source, wasmUrl, cMapUrl, standardFontDataUrl }: ThumbnailLoadDocumentRequest) {
   if (currentDocumentId === documentId && currentDocument) {
     worker.postMessage({ type: 'document-ready', documentId });
     return;
@@ -39,15 +41,26 @@ async function ensureDocumentLoaded(documentId: string, source: ArrayBuffer, was
 
   await disposeCurrentDocument();
 
+  if (typeof OffscreenCanvas === 'undefined' || typeof Path2D === 'undefined' || typeof DOMMatrix === 'undefined') {
+    throw new Error('Worker PDF glyph paths are unavailable');
+  }
+
   currentLoadingTask = pdfjsLib.getDocument({
     data: new Uint8Array(source),
-    cMapUrl: `https://unpkg.com/pdfjs-dist@5.4.296/cmaps/`,
+    cMapUrl,
     cMapPacked: true,
     wasmUrl,
+    standardFontDataUrl,
+    CMapReaderFactory: WorkerCMapReaderFactory,
+    StandardFontDataFactory: WorkerStandardFontDataFactory,
     WasmFactory: WorkerWasmFactory,
     CanvasFactory: WorkerCanvasFactory,
     isEvalSupported: false,
     useWorkerFetch: false,
+    // Dedicated workers have no document.fonts. Otherwise PDF.js can swallow
+    // font registration failures and return successful private-use tofu glyphs.
+    disableFontFace: true,
+    useSystemFonts: false,
   });
 
   currentDocument = await currentLoadingTask.promise;
@@ -64,6 +77,7 @@ async function renderThumbnail(message: ThumbnailRenderRequest) {
 
   try {
     page = await currentDocument.getPage(message.pageNumber);
+    await assertPdfFontSupport(page);
     const baseViewport = page.getViewport({ scale: 1 });
     const scale = message.maxWidth / baseViewport.width;
     const viewport = page.getViewport({ scale });
@@ -110,7 +124,7 @@ worker.onmessage = (event: MessageEvent<ThumbnailWorkerRequest>) => {
   renderQueue = renderQueue.then(async () => {
     if (message.type === 'load-document') {
       try {
-        await ensureDocumentLoaded(message.documentId, message.source, message.wasmUrl);
+        await ensureDocumentLoaded(message);
       } catch (error) {
         worker.postMessage({
           type: 'document-error', documentId: message.documentId,

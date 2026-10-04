@@ -13,6 +13,7 @@ import { useUnsavedExitGuard } from '../hooks/useUnsavedExitGuard';
 import { useWorkspaceAutoSave } from '../hooks/useWorkspaceAutoSave';
 import { PDFPasswordRequiredError } from '../services/PDFService';
 import { prepareHeldRead } from '../services/HeldReadTransaction';
+import { notifyReaderNavigation } from '../services/readerNavigationIntent';
 import { useThumbnailActions } from '../hooks/useThumbnailActions';
 import { ThumbnailActionDialog } from '../components/thumbnails/ThumbnailActionDialog';
 
@@ -318,9 +319,17 @@ function App() {
         {(windowNotice || heldNotice) && <div role="status" className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-950"><span>{windowNotice || heldNotice}</span><button aria-label="关闭操作提示" className="p-2" onClick={() => { clearWindowNotice(); useHeldStore.getState().clearNotice(); }}><X size={16} /></button></div>}
         <main inert={busy} className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <section inert={showHeldPages} className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#edece9]">
-            {documentId ? <WorkspaceCanvas subscribeInterruption={thumbnailActions.controller.onInterrupt} windows={windows} onWindowUpdate={(win) => { updateWindow(win.id, win); if (win.isActive) setActiveWindow(win.id); }} onWindowClose={closeReferenceWindow} /> : (
+            {documentId ? <WorkspaceCanvas subscribeInterruption={thumbnailActions.controller.onInterrupt} windows={windows} onWindowUpdate={(win) => {
+              // Canvas callbacks carry the full window for layout operations.
+              // Do not turn a raise/drag/resize into a new page choice or replay
+              // a stale paper viewport while applying that geometry.
+              updateWindow(win.id, { x: win.x, y: win.y, width: win.width, height: win.height,
+                type: win.type, dockMode: win.dockMode, splitRatio: win.splitRatio,
+                zIndex: win.zIndex, isActive: win.isActive });
+              if (win.isActive) setActiveWindow(win.id);
+            }} onWindowClose={closeReferenceWindow} /> : (
               <div className="flex min-h-0 flex-1 overflow-y-auto bg-[var(--surface)] p-4 sm:p-8 lg:items-center lg:justify-center">
-                <div className="m-auto grid w-full max-w-[1080px] grid-cols-1 border border-[var(--border)] bg-[var(--surface)] shadow-[0_24px_70px_rgba(28,25,23,0.05)] md:grid-cols-[1.15fr_0.85fr]">
+                <div className="m-auto grid w-full max-w-[1080px] grid-cols-1 border border-[var(--border)] bg-[var(--surface)] shadow-[0_24px_70px_rgba(28,25,23,0.05)] md:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
                   <div className="px-6 py-9 sm:px-10 sm:py-12 md:border-r md:border-[var(--border)]">
                     <div className="mb-5 text-xs font-semibold tracking-[0.2em] text-stone-500">为深度阅读，留一片空间</div>
                     <h1 className="text-4xl font-extrabold tracking-tight text-stone-900 sm:text-5xl" style={{ fontFamily: 'Georgia, serif' }}>页境阅读</h1>
@@ -333,7 +342,7 @@ function App() {
                       <li><strong className="mr-3 text-stone-800">03 对照</strong>夹住关键页，打开参考窗口并排研读</li>
                     </ol>
                   </div>
-                  <div className="border-t border-[var(--border)] bg-[#f6f1e8] px-6 py-8 sm:px-8 md:border-t-0">
+                  <div className="min-w-0 border-t border-[var(--border)] bg-[#f6f1e8] px-6 py-8 sm:px-8 md:border-t-0">
                     <div className="mb-6 flex items-baseline justify-between border-b border-[var(--border)] pb-4"><h2 className="text-xl font-semibold text-stone-900">最近打开</h2><span className="text-xs text-stone-500">{recentBooks.length} 本</span></div>
                     <div className="space-y-3">{recentBooks.length ? recentBooks.map((recent) => (
                       <button key={recent.documentId} type="button" disabled={busy} className="flex w-full items-start gap-3 border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:border-stone-700 disabled:opacity-50" onClick={() => { setWorkflowError(null); setDismissedError(null); closeQuickFlip(); void openRecentBook(recent.documentId); }}>
@@ -363,7 +372,7 @@ function App() {
             }} onPageClick={(page) => { openInNewWindow(page.pageNumber); closeHeldPanel(); }} onRemovePage={(id, closeReferences) => { const page = heldPages.find((candidate) => candidate.id === id); if (page) { if (closeReferences) useWindowStore.getState().closeWindowsForPage(page.pageNumber); unholdPage(page.pageNumber); } }} />
           </aside>}
         </main>
-        {documentId && <footer inert={busy} className="h-16 shrink-0 border-t border-[var(--border)]"><TimelineBar key={`${documentId}:${activeWindowId}:${isQuickFlipVisible}:${showHeldPages}:${busy}:${thumbnailActions.isOpen}`} currentPage={activePage} chapters={book.toc} totalPages={totalPages} onPageClick={jumpToPage} markers={heldPages.map((page) => page.pageNumber)} /></footer>}
+        {documentId && <footer inert={busy} className="h-16 shrink-0 border-t border-[var(--border)]"><TimelineBar key={`${documentId}:${activeWindowId}:${isQuickFlipVisible}:${showHeldPages}:${busy}:${thumbnailActions.isOpen}`} currentPage={activePage} chapters={book.toc} totalPages={totalPages} onPageClick={jumpToPage} onPreviewStart={() => notifyReaderNavigation(useWindowStore.getState().activeWindowId ?? 'main')} markers={heldPages.map((page) => page.pageNumber)} /></footer>}
       </div>
       {isQuickFlipVisible && ready && <QuickFlipOverlay thumbnailActions={thumbnailActions.controller} interactionSuspended={thumbnailActions.isOpen} isVisible restoreFocusOnClose={false} onClose={dismissQuickFlip} currentPage={quickFlipOrigin.current.page} totalPages={totalPages} onPageChange={page => { updateWindow(quickFlipOrigin.current.windowId, { pageNumber: page }); setActiveWindow(quickFlipOrigin.current.windowId); }} />}
       {thumbnailActions.request && <ThumbnailActionDialog controller={thumbnailActions.controller} request={thumbnailActions.request} awaitingRelease={thumbnailActions.awaitingRelease} />}

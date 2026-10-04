@@ -7,27 +7,48 @@ import { test, expect, importBook, reader, quickFlip, snapshots, reopenRecent } 
 const fixture = fileURLToPath(new URL('../fixtures/leafspace-links.pdf', import.meta.url));
 const colors = [[51, 128, 77], [26, 89, 179], [179, 64, 26]];
 const annotation = (region: Locator, id: string) => region.locator(`.annotationLayer [data-annotation-id="${id}"] a`);
-type LinkGate = { holding: boolean; queued: number; workers: number; release: () => void };
+type LinkGate = { holding: boolean; queued: number; workers: number; pending: number; responses: number; release: () => void };
 const gate = (page: Page) => page.evaluate(() => {
-  const { holding, queued, workers } = (window as unknown as { leafspaceLinkGate: LinkGate }).leafspaceLinkGate;
-  return { holding, queued, workers };
+  const { holding, queued, workers, pending, responses } = (window as unknown as { leafspaceLinkGate: LinkGate }).leafspaceLinkGate;
+  return { holding, queued, workers, pending, responses };
 });
 async function installGate(page: Page) {
   await page.addInitScript(() => {
     const pending: (() => void)[] = [];
-    const state = { holding: false, queued: 0, workers: 0, release() { state.holding = false; pending.splice(0).forEach(send => send()); } };
+    const state = { holding: false, queued: 0, workers: 0, pending: 0, responses: 0, release() { state.holding = false; pending.splice(0).forEach(send => send()); } };
     Object.assign(window, { leafspaceLinkGate: state });
     const NativeWorker = window.Worker, postMessage = NativeWorker.prototype.postMessage;
     window.Worker = class extends NativeWorker {
-      constructor(url: string | URL, options?: WorkerOptions) { super(url, options); state.workers++; }
+      requests = new Set<string>();
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options); state.workers++;
+        this.addEventListener('message', event => {
+          const message = event.data;
+          if (message?.callback && this.requests.delete(`${message.targetName}:${message.callbackId}`)) { state.pending--; state.responses++; }
+        });
+      }
       postMessage(message: unknown, options?: StructuredSerializeOptions | Transferable[]) {
-        const request = message as { action?: string; data?: { id?: string } };
+        const request = message as { action?: string; sourceName?: string; callbackId?: number; data?: { id?: string } };
+        if (['GetDestination', 'GetPageIndex'].includes(request?.action ?? '') && typeof request.callbackId === 'number') {
+          this.requests.add(`${request.sourceName}:${request.callbackId}`); state.pending++;
+        }
         const send = () => Reflect.apply(postMessage, this, options === undefined ? [message] : [message, options]);
         if (state.holding && request?.action === 'GetDestination' && request.data?.id === 'chapter') { state.queued++; pending.push(send); }
         else send();
       }
     };
   });
+}
+async function holdNamedLink(page: Page) {
+  await page.evaluate(() => { (window as unknown as { leafspaceLinkGate: LinkGate }).leafspaceLinkGate.holding = true; });
+  await annotation(reader(page), '11R').focus(); await page.keyboard.press('Enter');
+  await expect.poll(async () => (await gate(page)).queued).toBe(1);
+}
+async function releaseAndSettle(page: Page) {
+  await page.evaluate(() => (window as unknown as { leafspaceLinkGate: LinkGate }).leafspaceLinkGate.release());
+  await expect.poll(async () => { const state = await gate(page); return state.responses > 0 && state.pending === 0; }).toBe(true);
+  // Worker replies and their Promise continuations precede this paint boundary.
+  await page.evaluate(async () => { await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); });
 }
 async function save(page: Page) {
   await page.getByRole('button', { name: '保存现场', exact: true }).click();
@@ -130,5 +151,94 @@ for (const newerFocus of ['main', 'reference-toolbar'] as const) {
     await page.evaluate(() => (window as unknown as { leafspaceLinkGate: LinkGate }).leafspaceLinkGate.release());
     await expectPage(reference, 3); await expectPage(reader(page), 2); await expect(newer).toBeFocused();
     await info.attach(`delayed-link-${newerFocus}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+}
+
+test('manual navigation away and back supersedes a pending PDF link', async ({ page }) => {
+  await installGate(page); await page.goto('/'); await importBook(page, fixture); await expectPage(reader(page), 1);
+  await holdNamedLink(page); await reader(page).focus();
+  await page.keyboard.press('ArrowRight'); await expectPage(reader(page), 2);
+  await page.keyboard.press('ArrowLeft'); await expectPage(reader(page), 1);
+  await releaseAndSettle(page); await expectPage(reader(page), 1); await expect(reader(page)).toBeFocused();
+});
+
+test('a newer numeric link supersedes a pending PDF link', async ({ page }) => {
+  await installGate(page); await page.goto('/'); await importBook(page, fixture); await expectPage(reader(page), 1);
+  await holdNamedLink(page); await annotation(reader(page), '10R').click(); await expectPage(reader(page), 2);
+  await releaseAndSettle(page); await expectPage(reader(page), 2);
+});
+
+for (const action of ['Home', 'page-input'] as const) {
+  test(`same-page ${action} navigation supersedes a pending PDF link`, async ({ page }) => {
+    await installGate(page); await page.goto('/'); await importBook(page, fixture); await expectPage(reader(page), 1);
+    await holdNamedLink(page);
+    if (action === 'Home') { await reader(page).focus(); await page.keyboard.press('Home'); }
+    else { const input = page.getByRole('textbox', { name: '输入页码' }); await input.fill('1'); await input.press('Enter'); }
+    await releaseAndSettle(page); await expectPage(reader(page), 1);
+  });
+}
+
+test('missing internal destination has dismissible feedback and keeps a reference window open on Escape', async ({ page }, info) => {
+  test.skip(['tablet', 'mobile', 'mobile-webkit'].includes(info.project.name), 'Simultaneously visible reference ownership');
+  await page.goto('/'); await importBook(page, fixture); await expectPage(reader(page), 1);
+  await page.getByRole('button', { name: /^速翻/ }).click(); await expect(quickFlip(page)).toBeVisible(); await page.keyboard.press('n');
+  const reference = page.getByRole('region', { name: /^参考阅读区/ }); await expectPage(reference, 1);
+  await annotation(reference, '17R').click();
+  await expect(page.getByRole('alert')).toContainText('无法打开此链接');
+  await page.getByRole('button', { name: '关闭链接提示' }).focus(); await page.keyboard.press('Escape');
+  await expect(page.getByText('无法打开此链接。可尝试目录或页码导航。')).toHaveCount(0);
+  await expectPage(reference, 1); await expect(reference).toBeFocused(); await expect(page.locator('[data-floating-window]')).toHaveCount(1);
+  await annotation(reference, '10R').click(); await expectPage(reference, 2);
+});
+
+test('post-pinch internal-link ghost click is suppressed before PDF resolution while keyboard remains available', async ({ page }) => {
+  await installGate(page); await page.goto('/'); await importBook(page, fixture); await expectPage(reader(page), 1);
+  const before = await gate(page);
+  const canceled = await reader(page).evaluate(element => {
+    const box = element.getBoundingClientRect(), x = box.x + box.width / 2, y = box.y + 100;
+    const touches = [1, 2].map((identifier, index) => ({ identifier, target: element, clientX: x + (index ? 40 : -40), clientY: y }));
+    for (const type of ['touchstart', 'touchend']) {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, { touches: { value: type === 'touchstart' ? touches : [] }, changedTouches: { value: touches } });
+      element.dispatchEvent(event);
+    }
+    const link = element.querySelector<HTMLAnchorElement>('[data-annotation-id="11R"] a')!;
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 });
+    link.dispatchEvent(click);
+    return click.defaultPrevented;
+  });
+  expect(canceled).toBe(true); expect((await gate(page)).pending).toBe(before.pending); expect((await gate(page)).responses).toBe(before.responses);
+  await expectPage(reader(page), 1);
+  await annotation(reader(page), '11R').focus(); await page.keyboard.press('Enter'); await expectPage(reader(page), 3);
+});
+
+for (const action of ['open', 'cancel', 'commit'] as const) {
+  test(`QuickFlip ${action} supersedes a pending PDF link`, async ({ page }) => {
+    await installGate(page); await page.goto('/'); await importBook(page, fixture); await expectPage(reader(page), 1);
+    await holdNamedLink(page); await reader(page).focus(); await page.keyboard.press('Space'); await expect(quickFlip(page)).toBeVisible();
+    if (action === 'cancel') { await page.keyboard.press('Escape'); await expect(quickFlip(page)).toHaveCount(0); }
+    if (action === 'commit') {
+      await quickFlip(page).getByRole('button', { name: '选择第 2 页', exact: true }).click();
+      await quickFlip(page).getByRole('button', { name: '阅读此页', exact: true }).click(); await expectPage(reader(page), 2);
+    }
+    await releaseAndSettle(page);
+    const currentPaper = page.locator('[data-window-id="main"] .react-pdf__Page');
+    await expect(currentPaper).toHaveAttribute('data-page-number', action === 'commit' ? '2' : '1');
+    if (action === 'open') { await expect(quickFlip(page)).toBeVisible(); await page.keyboard.press('Escape'); }
+    await expectPage(reader(page), action === 'commit' ? 2 : 1); await expect(reader(page)).toBeFocused();
+  });
+}
+
+for (const action of ['commit', 'cancel'] as const) {
+  test(`timeline preview ${action} supersedes an older PDF link before pointer release`, async ({ page }) => {
+    await installGate(page); await page.goto('/'); await importBook(page, fixture); await expectPage(reader(page), 1);
+    await holdNamedLink(page);
+    const slider = page.getByRole('slider', { name: '跳转到页码' }), box = await slider.boundingBox();
+    if (!box) throw new Error('Missing timeline');
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
+    await expect(slider).toHaveValue('2'); await expect(slider).toHaveAttribute('aria-valuetext', /^预览：/);
+    await releaseAndSettle(page); await expectPage(reader(page), 1);
+    if (action === 'cancel') await page.keyboard.press('Escape');
+    await page.mouse.up(); await expectPage(reader(page), action === 'commit' ? 2 : 1);
   });
 }
