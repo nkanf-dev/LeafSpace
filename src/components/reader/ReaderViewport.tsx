@@ -71,6 +71,7 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
   
   const containerRef = useRef<HTMLDivElement>(null);
   const contentFrameRef = useRef<HTMLDivElement>(null);
+  const pageElementRef = useRef<HTMLDivElement>(null);
   const [isPanning, setIsPanning] = useState(false);
   const panGestureActive = useRef(false);
   const [shouldCenterHorizontally, setShouldCenterHorizontally] = useState(true);
@@ -93,6 +94,37 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
       renderGeneration.current += 1;
     };
   }, []);
+  const effectiveWindowId = windowId ?? 'main';
+  const linkOwner = useMemo(() => ({ sessionId, documentUrl, windowId: effectiveWindowId }), [sessionId, documentUrl, effectiveWindowId]);
+  const liveLinkOwner = useRef<typeof linkOwner | null>(linkOwner);
+  useLayoutEffect(() => {
+    liveLinkOwner.current = linkOwner;
+    return () => { if (liveLinkOwner.current === linkOwner) liveLinkOwner.current = null; };
+  }, [linkOwner]);
+  const handlePdfLink = useCallback(({ pageNumber: destination }: { pageNumber: number }) => {
+    const book = useBookStore.getState(), workspace = useWindowStore.getState();
+    if (!mounted.current || liveLinkOwner.current !== linkOwner || book.status !== 'ready'
+      || book.sessionId !== linkOwner.sessionId || book.documentUrl !== linkOwner.documentUrl
+      || !Number.isInteger(destination) || destination < 1 || destination > book.totalPages) return;
+    const origin = workspace.windows.find(window => window.id === linkOwner.windowId);
+    if (!origin) return;
+    const container = containerRef.current, pageElement = pageElementRef.current;
+    const visibleOwner = container?.isConnected && container.clientWidth > 0 && container.clientHeight > 0 && !container.closest('[inert]');
+    const currentPageElement = pageElement?.isConnected && container?.contains(pageElement)
+      && pageElement.dataset.pageNumber === String(origin.pageNumber);
+    if (origin.pageNumber === destination) {
+      // Preserve React-PDF's existing same-page behavior, scoped to this pane.
+      if (visibleOwner && currentPageElement) pageElement.scrollIntoView();
+      return;
+    }
+    // The departing annotation will disappear. Hand back only focus it still
+    // owns; asynchronous completion must not steal newer pane/toolbar focus.
+    if (visibleOwner && currentPageElement && workspace.activeWindowId === linkOwner.windowId
+      && pageElement.querySelector('.annotationLayer')?.contains(document.activeElement)) {
+      container.focus({ preventScroll: true });
+    }
+    workspace.updateWindow(linkOwner.windowId, { pageNumber: destination });
+  }, [linkOwner]);
   const [renderFeedback, setRenderFeedback] = useState<RenderFeedback>(null);
   const showRenderFailure = renderFeedback?.kind === 'failed' && renderFeedback.token === renderToken;
   const showRenderRetry = renderFeedback?.kind === 'retrying' && renderFeedback.context === renderContext && renderFeedback.attempt === retryAttempt;
@@ -722,13 +754,19 @@ export const ReaderViewport: React.FC<Props> = ({ pageNumber, isMain = false, wi
               style={paperRatio ? { width: Math.floor(pageWidth * scale) + 2, height: Math.floor(pageWidth * scale * paperRatio) + 2 } : undefined}>
               {file ? (
                 <Document
+                  // React-PDF's viewer captures its initial onItemClick, while
+                  // its LinkService resolves destinations asynchronously. A new
+                  // source/session/owner needs a distinct viewer and callback.
+                  key={JSON.stringify([linkOwner.sessionId, linkOwner.documentUrl, linkOwner.windowId])}
                   file={file}
                   options={options}
+                  onItemClick={handlePdfLink}
                   error={<div role="alert" className="max-w-xs p-6 text-sm text-red-800">页面暂时无法显示，请重新导入这本 PDF。</div>}
                   loading={<div role="status" className="mt-24 text-sm italic text-stone-500" style={{ fontFamily: 'Georgia, Times New Roman, serif' }}>正在渲染...</div>}
                 >
                   <Page
                     key={`${sessionId}:${windowId ?? 'main'}:${retryAttempt}`}
+                    inputRef={pageElementRef}
                     canvasRef={initializeCanvas}
                     pageNumber={activePage}
                     width={pageWidth}
