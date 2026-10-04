@@ -1,27 +1,50 @@
-name: Page raster recovery evidence
+name: Production asset verification
 on:
   push:
     branches: ['dev/diag-render-recovery']
 permissions:
   contents: read
 jobs:
-  timeline_stability:
+  production:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: 453dcbcda4b3ab77f15f9271b5e4c7c43d6c7980
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps webkit
-      - run: npx playwright test gesture-contract.test.ts --project=webkit --grep 'timeline Escape' --repeat-each=10 --workers=1 --retries=0
+      - run: npm run build
+      - name: Verify deployed main identity and byte-exact public assets
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess,hashlib,re,json,concurrent.futures
+          root=Path('dist'); out=Path('production-evidence');out.mkdir(exist_ok=True)
+          expected='453dcbcda4b3ab77f15f9271b5e4c7c43d6c7980'
+          subprocess.run(['curl','-fsS','--max-time','25','https://leafspace.kanglives.top/','-o','production-evidence/index.html'],check=True)
+          html=Path('production-evidence/index.html').read_text();assert f'name="leafspace-build" content="{expected}"' in html,'Production build is not the merged main yet'
+          paths=sorted([p.relative_to(root) for p in (root/'assets').iterdir() if p.is_file()]+[p.relative_to(root) for p in (root/'pdfjs').rglob('*') if p.is_file()])
+          for name in re.findall(r'(?:src|href)="(/assets/[^" ]+)"',html): assert (root/name.lstrip('/')).is_file(),f'Unknown production entry asset {name}'
+          def verify(rel):
+           p=root/rel; downloaded=out/p.name; headers=out/(p.name+'.headers')
+           subprocess.run(['curl','-fsS','--max-time','25','-D',str(headers),'https://leafspace.kanglives.top/'+str(rel),'-o',str(downloaded)],check=True)
+           data=downloaded.read_bytes();assert data==p.read_bytes(),f'Byte mismatch {rel}'
+           ct=re.findall(r'^content-type:\s*(.+)',headers.read_text(),re.I|re.M);ct=ct[-1].strip() if ct else None
+           if p.suffix in ['.js','.mjs']:assert ct and ('javascript' in ct),f'Wrong JS MIME {rel}: {ct}'
+           if p.suffix=='.css':assert ct and ct.startswith('text/css')
+           if p.suffix=='.wasm':assert ct and ct.startswith('application/wasm') and data[:4]==b'\0asm'
+           return {'path':str(rel),'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest(),'contentType':ct}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool: results=list(pool.map(verify,paths))
+          (out/'verified.json').write_text(json.dumps({'build':expected,'assets':results},indent=2))
+          print(json.dumps({'build':expected,'verifiedAssets':len(results),'assets':results},indent=2))
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: leafspace-timeline-stability
-          path: |
-            playwright-report/
-            test-results/
+          name: leafspace-production-verification
+          path: production-evidence/
           retention-days: 14
